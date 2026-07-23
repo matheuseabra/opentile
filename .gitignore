@@ -1,0 +1,9 @@
+__pycache__/
+*.pyc
+exports/
+node_modules/
+dist/
+.vercel
+.env
+.DS_Store
+node_modules_hidden_message

@@ -1,0 +1,10 @@
+vendor/
+server.py
+run.sh
+test.sh
+assets/
+app/
+__pycache__/
+node_modules/
+dist/
+.DS_Store
