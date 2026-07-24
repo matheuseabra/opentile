@@ -10,7 +10,7 @@ Exports `<level>.level.json` using the schema in [LEVEL_EDITOR.md](LEVEL_EDITOR.
 
 ## Godot scene
 
-Exports `level.tscn` with used textures as `Sprite2D` regions and collision bodies. Copy the referenced PNG assets into the configured `res://art/` folder before opening the scene.
+Exports `level.tscn` with used textures as `Sprite2D` regions and collision bodies. Stacked terrain, decoration, and foreground tiles are emitted in render order. Copy the referenced PNG assets into the configured `res://art/` folder before opening the scene.
 
 ## Asset downloads
 

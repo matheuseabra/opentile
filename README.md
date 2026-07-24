@@ -1,37 +1,61 @@
-# Pixel Pipeline
+# ▓▓ Pixel Pipeline
 
-Local, zero-key asset cleanup and Godot-level sketcher.
+> **AI sprites → pixel cleanup → level sketch → Godot export**
+
+Local-first tooling for turning generated 2D game art into usable pixel-art
+assets and quick playable level drafts. No hosted backend is required for the
+editor.
+
+```text
+┌──────────────┐   ┌──────────────┐   ┌──────────────┐
+│  IMAGEGEN    │ → │  PIXEL FIX   │ → │  LEVEL GRID  │
+│  sprites     │   │  hard edges  │   │  Godot .tscn │
+└──────────────┘   └──────────────┘   └──────────────┘
+```
+
+![Pixel Pipeline editor](docs/editor-screenshot.jpg)
+
+## Start
 
 ```sh
-./run.sh
+./run.sh             # Vite editor + local pixel-fixer bridge
+./test.sh            # smoke checks
+npm run build        # production bundle
 ```
 
-This starts the React/Vite editor at `http://localhost:5173` and the local Python fixer behind its `/api` proxy. Run `./test.sh` for the backend smoke check or `npm run build` for the React production build.
+Open <http://localhost:5173>.
 
-The active UI is `src/main.jsx`.
+## Pixel-art workflow
 
-Project documentation is collected in [`docs/README.md`](docs/README.md), including setup, architecture, asset processing, shortcuts, level data, and export contracts.
+1. Generate a single PNG sprite or uniform sprite sheet with `$imagegen`.
+   Request hard edges, a fixed frame size, no text or gradients, and a limited
+   palette.
+2. Upload it to the editor. Uploads automatically use remove.bg through the
+   local Python bridge when `REMOVE_BG_API_KEY` is set in `.env`, and fall back
+   to the original file if removal fails.
+3. Choose **Fix pixel grid** when the result needs the bundled
+   [Retro Diffusion Pixel Art Fixer](https://github.com/Retro-Diffusion/pixel-art-fixer)
+   locally.
+4. Paint tiles, mark collision cells, place objects, and export a PNG preview,
+   structured JSON, or `level.tscn`.
 
-1. Use `$imagegen` in Codex to generate a **single PNG sprite or a uniform sprite sheet**. Ask for a transparent or flat, high-contrast background, a fixed native frame size, hard edges, no text, no gradients, and a limited palette.
-2. Upload it, then use **Fix pixel grid**. It invokes the bundled [Retro Diffusion Pixel Art Fixer](https://github.com/Retro-Diffusion/pixel-art-fixer) locally.
-3. Use **Remove corner background** for simple flat/corner-connected backdrops; it makes those pixels transparent locally, without an API.
-4. Paint a draft level, mark collision cells, download its used assets, then export `level.tscn`. Copy the PNGs into the matching `res://art/` location in your Godot project before opening the scene.
+Copy exported PNGs into the matching `res://art/` folder before opening the
+Godot scene. The editor intentionally exports `Sprite2D`s instead of a
+configured Godot `TileSet`, keeping the sketching loop fast.
 
-The editor deliberately produces `Sprite2D`s rather than a Godot `TileSet`: it imports every image immediately and has no tileset configuration ceremony. Move to a TileMap/terrain set after the layout stabilizes.
+## Level data
 
-## Level authoring contract
+Levels use a structured document with `metadata`, `platforms`, `props`,
+`pickups`, `enemies`, and `exits`. See the complete schema and examples in
+[`docs/README.md`](docs/README.md) and [`docs/LEVEL_EDITOR.md`](docs/LEVEL_EDITOR.md).
 
-Levels are authored as structured data rather than an anonymous tile map. The canonical shape is:
+## Project map
 
-```json
-{
-  "metadata": { "id": "main", "name": "Main Level", "width": 48, "backgroundSet": "forest" },
-  "platforms": [{ "assetId": "ground.png", "x": 4, "y": 12, "scale": 1, "collision": true }],
-  "props": [{ "frameId": "tree.png:0,0", "x": 8, "y": 9, "depth": 2 }],
-  "pickups": [{ "pickupType": "coin", "x": 10, "y": 8 }],
-  "enemies": [{ "enemyId": "slime", "x": 14, "y": 12, "facing": "left", "tuning": {} }],
-  "exits": [{ "exitId": "cave", "x": 46, "y": 12, "collision": { "w": 32, "h": 64 }, "targetAnimation": "fade" }]
-}
+```text
+src/main.jsx       React/Vite editor
+src/styles.css     pixel-art UI styling
+server.py          loopback image-processing bridge
+assets/            intentional sample/generated art
+vendor/            bundled pixel-art fixer
+docs/              setup, schema, shortcuts, and export notes
 ```
-
-The editor should support loading a level from the level dropdown, creating a level, saving over the current level, and saving a new copy. Objects are selected on the canvas and edited through a DOM inspector for absolute position, type-specific settings, and deletion. Selected objects expose X/Y gizmos for axis-constrained dragging; labels, collision overlays, and horizontal scrolling remain visible for wide levels.
