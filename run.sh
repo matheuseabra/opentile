@@ -1,6 +1,26 @@
 #!/bin/sh
 set -eu
 
+python_bin="${PYTHON_BIN:-python3.13}"
+if ! command -v "$python_bin" >/dev/null 2>&1; then
+  echo "Python 3.11–3.13 is required for rembg. Set PYTHON_BIN to one." >&2
+  exit 1
+fi
+if [ ! -x .venv/bin/python ]; then
+  "$python_bin" -m venv .venv
+fi
+if ! .venv/bin/python -c 'import rembg' >/dev/null 2>&1; then
+  .venv/bin/pip install 'rembg[cpu]'
+fi
+
+fixer_patch=../pixel-art-fixer-macos.patch
+if git -C vendor/pixel-art-fixer apply --check "$fixer_patch" 2>/dev/null; then
+  git -C vendor/pixel-art-fixer apply "$fixer_patch"
+elif ! git -C vendor/pixel-art-fixer apply --reverse --check "$fixer_patch" 2>/dev/null; then
+  echo "Could not apply the macOS pixel-fixer compatibility patch." >&2
+  exit 1
+fi
+
 if [ ! -x vendor/pixel-art-fixer/rust/target/release/pixelfixer ]; then
   (cd vendor/pixel-art-fixer/rust && cargo build --release)
 fi
@@ -14,7 +34,7 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-PORT_FILE="$port_file" python3 server.py &
+PORT_FILE="$port_file" .venv/bin/python server.py &
 backend_pid=$!
 tries=0
 while [ ! -s "$port_file" ] && [ "$tries" -lt 50 ]; do

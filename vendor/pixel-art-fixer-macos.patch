@@ -1,0 +1,24 @@
+diff --git a/rust/src/main.rs b/rust/src/main.rs
+index b7daccb..5ac2d2b 100644
+--- a/rust/src/main.rs
++++ b/rust/src/main.rs
+@@ -1,6 +1,7 @@
+ use pixelfixer::{autocorr, core, reconstruct, runlengths, selfsim};
+ 
+ /// Peak working-set size (bytes) of this process, via psapi.
++#[cfg(target_os = "windows")]
+ fn peak_rss() -> u64 {
+     #[repr(C)]
+     struct Pmc {
+@@ -31,6 +32,11 @@ fn peak_rss() -> u64 {
+     }
+ }
+ 
++// The upstream CLI reports this Windows-only diagnostic. It is not part of
++// reconstruction, so keep the command portable rather than adding an OS API.
++#[cfg(not(target_os = "windows"))]
++fn peak_rss() -> u64 { 0 }
++
+ fn main() {
+     let args: Vec<String> = std::env::args().collect();
+     if args.len() < 3 {

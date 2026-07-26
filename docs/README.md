@@ -6,4 +6,4 @@
 - [Asset pipeline](ASSET_PIPELINE.md) — generation, cleanup, categorization, and import.
 - [Level editor](LEVEL_EDITOR.md) — level schema and object-authoring behavior.
 - [Keyboard shortcuts](SHORTCUTS.md) — editing, selection, picker, and debug controls.
-- [Export contract](EXPORTS.md) — PNG, JSON, Godot scene, and asset exports.
+- [Export contract](EXPORTS.md) — PNG, JSON, Godot scene, Phaser tilemap, and asset exports.

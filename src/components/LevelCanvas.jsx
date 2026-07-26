@@ -12,21 +12,26 @@ export function LevelCanvas({
   copySelection,
   currentDoc,
   debug,
+  grid,
   erase,
   levelWidth,
+  levelHeight,
   mode,
   onDown,
+  onStageDown,
+  onCanvasWheel,
   onMove,
   onUp,
   pasteSelection,
   placedCount,
   setEraser,
   setMode,
+  stageRef,
   t,
   zoom,
 }) {
   return (
-    <section id="stage">
+    <section ref={stageRef} id="stage" className={grid ? "grid-on" : "grid-off"} style={{ "--grid-size": `${t * zoom}px` }} onWheel={onCanvasWheel} onPointerDown={onStageDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp}>
       {debug && (
         <div className="debug-panel">
           <strong>DEBUG</strong>
@@ -37,6 +42,7 @@ export function LevelCanvas({
         </div>
       )}
       <div className="canvas-wrap">
+        <div className="map-size-overlay">{levelWidth} × {levelHeight} tiles</div>
         <div className="canvas-tools" aria-label="Selection tools">
           <button
             className={mode === "brush" ? "active" : ""}
@@ -83,27 +89,14 @@ export function LevelCanvas({
             <ClipboardPaste size={16} />
           </button>
         </div>
-        <div className="axis-x">
-          {Array.from({ length: levelWidth }, (_, index) => (
-            <span key={index} style={{ left: `${index * t * zoom + 3}px` }}>
-              {index}
-            </span>
-          ))}
-        </div>
-        <div className="axis-y">
-          {Array.from({ length: Math.floor(576 / t) }, (_, index) => (
-            <span key={index} style={{ top: `${index * t * zoom + 3}px` }}>
-              {index}
-            </span>
-          ))}
-        </div>
         <canvas
           ref={canvasRef}
           width={levelWidth * t}
-          height="576"
+          height={levelHeight * t}
           style={{
             width: `${levelWidth * t * zoom}px`,
-            height: `${576 * zoom}px`,
+            height: `${levelHeight * t * zoom}px`,
+            touchAction: "none",
           }}
           onContextMenu={(event) => event.preventDefault()}
           onPointerDown={onDown}

@@ -2,7 +2,9 @@
 
 The app is intentionally local-first and currently has three main pieces:
 
-- `src/main.jsx`: React UI, canvas renderer, editor interactions, IndexedDB asset loading, and localStorage level documents.
+- `src/main.jsx`: React UI and editor coordination.
+- `src/lib/canvasEditor.js`: tile selection, clipboard, deletion, and movement rules.
+- `src/lib/assetLibrary.js`: asset naming, image hydration, and IndexedDB lifecycle.
 - `src/styles.css`: pixel-art UI, canvas layout, action rail, picker, inspector, and debug panel.
 - `vendor/pixel-art-fixer/`: bundled cleanup implementation used by the local API.
 
@@ -10,7 +12,9 @@ The app is intentionally local-first and currently has three main pieces:
 
 - Assets: IndexedDB store `pixel-pipeline-assets` (`tiles` object store).
 - Level documents: localStorage key `pixel-pipeline-levels`.
-- Tile painting: in-memory refs for placed tiles, collisions, history, and redo.
+- Tile painting: in-memory refs for placed tiles, collisions, history, and redo; the serializable tile sketch is persisted in each level document.
 - Object authoring: the active structured level document plus selected object state.
 
-The canvas is a renderer, not the source of truth. Tile maps and structured objects are kept separately so exports can target the appropriate format.
+The canvas editing module and asset library module keep their domain rules behind small in-process seams. `main.jsx` coordinates them with React state and browser events; it does not reimplement tile movement or asset storage mechanics.
+
+The canvas is a renderer, not the source of truth. Runtime `Map`/`Set` values are hydrated from each level document's serializable `tiles` and `collisions` fields, while structured objects remain in their typed buckets.

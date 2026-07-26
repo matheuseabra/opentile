@@ -8,7 +8,7 @@ From the project root:
 ./run.sh
 ```
 
-Open `http://localhost:5173`. The Vite app is the editor; the local `/api` proxy exposes the pixel-art fixer.
+Open `http://localhost:5173`. The Vite app is the editor; the local `/api` proxy exposes pixel cleanup and rembg background removal.
 
 Run checks with:
 

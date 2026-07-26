@@ -9,31 +9,49 @@ import {
   Plus,
   Save,
   FilePlus2,
-  Upload,
   Download,
   ZoomIn,
   ZoomOut,
   RotateCcw,
   RotateCw,
   Trash2,
-  WandSparkles,
-  Crosshair,
-  Square,
-  Circle,
-  DoorOpen,
   Box,
   FileJson,
+  Eye,
+  EyeOff,
+  Lock,
+  Unlock,
+  Menu,
+  MoreHorizontal,
+  Shield,
 } from "lucide-react";
 import "./styles.css";
 import { AssetLibrary } from "./components/AssetLibrary";
 import { LevelCanvas } from "./components/LevelCanvas";
 import {
-  TILE_LAYERS,
+  DEFAULT_LAYERS,
+  layersForDocument,
   layersFor,
   putTile,
   removeTile,
   tilesFor,
 } from "./lib/tileLayers";
+import { clearLevelContent, hydrateSketch, normalizeLevel, serializeSketch } from "./lib/levelDocument";
+import { createPhaserTilemap } from "./lib/phaserTilemap";
+import {
+  createAsset,
+  nextAssetName,
+  openAssetStore,
+  persistAsset,
+  readStoredAssets,
+  removePersistedAsset,
+} from "./lib/assetLibrary";
+import {
+  copyTiles,
+  deleteTiles,
+  moveTiles,
+  pasteTiles,
+} from "./lib/canvasEditor";
 
 const key = (x, y) => `${x},${y}`;
 const CATEGORIES = ["terrain", "ground", "trees", "objects", "animated"];
@@ -51,12 +69,15 @@ const categoryForName = (name) => {
 };
 const OBJECT_TYPES = ["platform", "prop", "pickup", "enemy", "exit"];
 const newLevelDoc = (id, name = id) => ({
-  metadata: { id, name, width: 24, backgroundSet: "default" },
+  metadata: { id, name, width: 48, height: 36, backgroundSet: "default" },
+  layers: DEFAULT_LAYERS.map((layer) => ({ ...layer })),
   platforms: [],
   props: [],
   pickups: [],
   enemies: [],
   exits: [],
+  tiles: [],
+  collisions: [],
 });
 const objectBucket = (type) =>
   type === "platform"
@@ -71,14 +92,18 @@ const objectBucket = (type) =>
 
 function App() {
   const canvasRef = useRef(null),
+    stageRef = useRef(null),
     dbRef = useRef(null),
     assetsRef = useRef([]);
   const placedRef = useRef(new Map()),
     collisionsRef = useRef(new Set()),
     historyRef = useRef([]),
     redoRef = useRef([]),
-    levelsRef = useRef({ main: null, gym: null });
+    levelsRef = useRef({ main: null });
   const paintingRef = useRef(false),
+    toolStartRef = useRef(null),
+    panRef = useRef(null),
+    spaceRef = useRef(false),
     lastPaintRef = useRef(""),
     buttonRef = useRef(0);
   const [assets, setAssets] = useState([]),
@@ -86,14 +111,12 @@ function App() {
     [selectedRegion, setSelectedRegion] = useState({
       x: 0,
       y: 0,
-      w: 32,
-      h: 32,
+      w: 16,
+      h: 16,
     }),
-    [pickerScale, setPickerScale] = useState(1),
-    [modalPickerScale, setModalPickerScale] = useState(1),
-    [pickerOpen, setPickerOpen] = useState(false),
-    [zoom, setZoom] = useState(1),
-    [pickerDragStart, setPickerDragStart] = useState(null),
+    [menuOpen, setMenuOpen] = useState(false),
+    [levelZoom, setLevelZoom] = useState(1),
+    [pickerZoom, setPickerZoom] = useState(1),
     [level, setLevel] = useState("main");
   const [sourceFile, setSourceFile] = useState(null),
     [assetCategory, setAssetCategory] = useState("terrain"),
@@ -105,26 +128,25 @@ function App() {
       const saved = JSON.parse(
         localStorage.getItem("pixel-pipeline-levels") || "null",
       );
-      return (
-        saved || {
-          main: newLevelDoc("main", "Main Level"),
-          gym: newLevelDoc("gym", "Gym"),
-        }
-      );
+      const { gym, ...docs } = saved || {};
+      return Object.fromEntries(Object.entries({
+        main: newLevelDoc("main", "Main Level"),
+        ...docs,
+      }).map(([id, doc]) => [id, normalizeLevel(doc)]));
     } catch {
       return {
         main: newLevelDoc("main", "Main Level"),
-        gym: newLevelDoc("gym", "Gym"),
       };
     }
   });
   const [objectSelection, setObjectSelection] = useState(null),
     [objectMode, setObjectMode] = useState(false),
     [objectDrag, setObjectDrag] = useState(null);
-  const [tileSize, setTileSize] = useState(32),
+  const [tileSize, setTileSize] = useState(16),
     [grid, setGrid] = useState(true),
     [collision, setCollision] = useState(false),
-    [debug, setDebug] = useState(false);
+    [debug, setDebug] = useState(false),
+    [layerPanelOpen, setLayerPanelOpen] = useState(true);
   const [eraser, setEraser] = useState(false),
     [mode, setMode] = useState("brush"),
     [activeLayer, setActiveLayer] = useState("terrain"),
@@ -134,18 +156,80 @@ function App() {
     [lastTile, setLastTile] = useState({ x: 0, y: 0 }),
     [cursorActive, setCursorActive] = useState(false),
     [version, redraw] = useState(0);
+  const [tileAttributes, setTileAttributes] = useState({}),
+    [customAttributeKey, setCustomAttributeKey] = useState(""),
+    [customAttributeValue, setCustomAttributeValue] = useState("");
   const clipboardRef = useRef([]),
     clipboardSizeRef = useRef({ w: 1, h: 1 });
-  const bump = () => redraw((v) => v + 1),
-    t = Math.max(8, Number(tileSize) || 32);
-  const currentDoc = levelDocs[level] || newLevelDoc(level);
+  const t = Math.max(8, Number(tileSize) || 32);
+  useEffect(() => {
+    setSelectedRegion((region) => ({ ...region, w: t, h: t }));
+  }, [t]);
+  const currentDoc = normalizeLevel(levelDocs[level] || newLevelDoc(level));
   const levelWidth = Math.max(24, Number(currentDoc.metadata.width) || 24);
+  const levelHeight = Math.max(1, Number(currentDoc.metadata.height) || 18);
+  const documentLayers = layersForDocument(currentDoc);
+  const activeLayerDoc = documentLayers.find((layer) => layer.id === activeLayer);
+  const exportCollisions = new Set(collisionsRef.current);
+  for (const [cellKey, cell] of placedRef.current)
+    if (documentLayers.some((layer) => layer.visible && layer.collision && layersFor(cell)[layer.id]))
+      exportCollisions.add(cellKey);
   const persistLevels = (docs) => {
     setLevelDocs(docs);
     localStorage.setItem("pixel-pipeline-levels", JSON.stringify(docs));
   };
   const updateCurrentDoc = (updater) =>
     persistLevels({ ...levelDocs, [level]: updater(currentDoc) });
+  const persistSketch = () => {
+    const sketch = serializeSketch(placedRef.current, collisionsRef.current);
+    const docs = { ...levelDocs, [level]: { ...currentDoc, ...sketch } };
+    setLevelDocs(docs);
+    localStorage.setItem("pixel-pipeline-levels", JSON.stringify(docs));
+  };
+  const bump = (save = true) => {
+    if (save) persistSketch();
+    redraw((v) => v + 1);
+  };
+  const updateLayers = (updater) =>
+    updateCurrentDoc((doc) => ({ ...doc, layers: updater(layersForDocument(doc)) }));
+  const selectLayer = (id) => {
+    setActiveLayer(id);
+    setStatus("Active layer: " + (documentLayers.find((layer) => layer.id === id)?.name || id));
+  };
+  const addLayer = (type = "tile") => {
+    const name = prompt("Layer name", type === "autotile" ? "Autotile layer" : "Layer " + (documentLayers.length + 1));
+    if (!name) return;
+    const base = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "") || "layer";
+    const id = documentLayers.some((layer) => layer.id === base) ? base + "-" + Date.now() : base;
+    updateLayers((layers) => [...layers, { id, name, visible: true, locked: false, collision: false, type, rule: type === "autotile" ? { center: "required", cardinal: "required-or-empty", corners: "ignored" } : undefined }]);
+    selectLayer(id);
+  };
+  const duplicateLayer = (layer) => {
+    const id = layer.id + "-copy-" + Date.now();
+    updateLayers((layers) => [...layers, { ...layer, id, name: layer.name + " copy" }]);
+    selectLayer(id);
+  };
+  const deleteLayer = (layer) => {
+    if (documentLayers.length === 1 || !confirm("Delete " + layer.name + " and its tiles?")) return;
+    commit();
+    for (const [cellKey, cell] of placedRef.current) {
+      const next = removeTile(cell, layer.id);
+      if (next) placedRef.current.set(cellKey, next);
+      else placedRef.current.delete(cellKey);
+    }
+    updateLayers((layers) => layers.filter(({ id }) => id !== layer.id));
+    if (activeLayer === layer.id) setActiveLayer(documentLayers.find(({ id }) => id !== layer.id).id);
+    bump();
+  };
+  const moveLayer = (index, direction) => {
+    const target = index + direction;
+    if (target < 0 || target >= documentLayers.length) return;
+    updateLayers((layers) => {
+      const next = [...layers], [layer] = next.splice(index, 1);
+      next.splice(target, 0, layer);
+      return next;
+    });
+  };
   const addObject = (type) => {
     const id = "obj-" + Date.now();
     const base =
@@ -204,7 +288,7 @@ function App() {
         item.id === selectedObject.id ? { ...item, ...patch } : item,
       ),
     }));
-    bump();
+    bump(false);
   };
   const deleteSelectedObject = () => {
     if (!selectedObject) return;
@@ -218,16 +302,6 @@ function App() {
     setStatus("Deleted object.");
   };
 
-  const persist = (asset) =>
-    dbRef.current
-      ?.transaction("tiles", "readwrite")
-      .objectStore("tiles")
-      .put({ name: asset.name, blob: asset.blob, category: asset.category });
-  const removePersisted = (name) =>
-    dbRef.current
-      ?.transaction("tiles", "readwrite")
-      .objectStore("tiles")
-      .delete(name);
   const select = (asset) => {
     setSelected(asset);
     setSelectedRegion({ x: 0, y: 0, w: t, h: t });
@@ -239,6 +313,7 @@ function App() {
     collisions: new Set(collisionsRef.current),
     assets: [...assetsRef.current],
     selected,
+    document: currentDoc,
   });
   const commit = () => {
     historyRef.current.push(snapshot());
@@ -248,10 +323,18 @@ function App() {
   const restore = (s) => {
     placedRef.current = new Map(s.placed);
     collisionsRef.current = new Set(s.collisions);
+    levelsRef.current[level] = {
+      placed: new Map(s.placed),
+      collisions: new Set(s.collisions),
+    };
     assetsRef.current = [...s.assets];
     setAssets(s.assets);
     select(s.selected);
-    bump();
+    persistLevels({
+      ...levelDocs,
+      [level]: { ...s.document, ...serializeSketch(s.placed, s.collisions) },
+    });
+    redraw((v) => v + 1);
   };
   const undo = () => {
     const s = historyRef.current.pop();
@@ -267,6 +350,27 @@ function App() {
     restore(s);
     setStatus("Redid last action.");
   };
+  const clearLevel = () => {
+    const hasContent =
+      placedRef.current.size ||
+      collisionsRef.current.size ||
+      ["platforms", "props", "pickups", "enemies", "exits"].some(
+        (bucket) => currentDoc[bucket]?.length,
+      );
+    if (!hasContent) return setStatus("Level is already clear.");
+    if (!confirm(`Clear everything in ${currentDoc.metadata.name}?`)) return;
+    commit();
+    placedRef.current.clear();
+    collisionsRef.current.clear();
+    levelsRef.current[level] = { placed: new Map(), collisions: new Set() };
+    persistLevels({ ...levelDocs, [level]: clearLevelContent(currentDoc) });
+    setObjectSelection(null);
+    setObjectMode(false);
+    setObjectDrag(null);
+    setSelection(null);
+    redraw((v) => v + 1);
+    setStatus("Level cleared. Undo restores it.");
+  };
 
   const addAsset = (
     blob,
@@ -274,59 +378,33 @@ function App() {
     save = true,
     category = assetCategory,
   ) => {
-    const dot = originalName.lastIndexOf("."),
-      base = dot < 0 ? originalName : originalName.slice(0, dot),
-      ext = dot < 0 ? "" : originalName.slice(dot);
-    let name = originalName,
-      n = 1;
-    while (assetsRef.current.some((a) => a.name === name))
-      name = `${base}-${n++}${ext}`;
-    const url = URL.createObjectURL(blob),
-      image = new Image();
-    image.onload = () => {
-      const asset = {
-        name,
-        url,
-        image,
-        blob,
-        category: category || categoryForName(name),
-      };
+    const name = nextAssetName(assetsRef.current, originalName);
+    createAsset(blob, name, category || categoryForName(name)).then((asset) => {
       assetsRef.current = [...assetsRef.current, asset];
       setAssets(assetsRef.current);
-      if (save) persist(asset);
+      if (save) persistAsset(dbRef.current, asset);
       select(asset);
-    };
-    image.src = url;
+    });
   };
 
   const switchLevel = (next) => {
+    // ponytail: history is level-local; use per-level stacks if cross-level undo is needed.
+    historyRef.current = [];
+    redoRef.current = [];
     levelsRef.current[level] = {
       placed: new Map(placedRef.current),
       collisions: new Set(collisionsRef.current),
     };
     let target = levelsRef.current[next];
+    if (!target && levelDocs[next]?.tiles?.length) {
+      const names = new Set(levelDocs[next].tiles.map((tile) => tile.asset));
+      if ([...names].every((name) => assetsRef.current.some((asset) => asset.name === name))) {
+        target = hydrateSketch(levelDocs[next], assetsRef.current);
+        levelsRef.current[next] = target;
+      }
+    }
     if (!target) {
-      const asset = selected || assetsRef.current[0],
-        placed = new Map(),
-        collisions = new Set();
-      for (let x = 1; x < 23; x++) {
-        if (asset) placed.set(key(x, 16), { asset, sx: 0, sy: 0 });
-        collisions.add(key(x, 16));
-      }
-      for (const [x, y] of [
-        [4, 12],
-        [5, 12],
-        [6, 12],
-        [11, 10],
-        [12, 10],
-        [13, 10],
-        [18, 7],
-        [19, 7],
-      ]) {
-        if (asset) placed.set(key(x, y), { asset, sx: 0, sy: 0 });
-        collisions.add(key(x, y));
-      }
-      target = { placed, collisions };
+      target = { placed: new Map(), collisions: new Set() };
       levelsRef.current[next] = target;
     }
     placedRef.current = new Map(target.placed);
@@ -335,68 +413,58 @@ function App() {
     setSelection(null);
     setCursor({ x: 0, y: 0 });
     setLastTile({ x: 0, y: 0 });
-    setDebug(next === "gym");
-    bump();
-    setStatus(
-      next === "gym"
-        ? "Gym sample platformer loaded. Debug overlay enabled."
-        : "Main level loaded.",
-    );
+    setDebug(false);
+    bump(false);
+    setStatus((levelDocs[next]?.metadata.name || next) + " loaded.");
   };
 
   useEffect(() => {
-    const request = indexedDB.open("pixel-pipeline-assets", 1);
-    request.onupgradeneeded = (e) =>
-      e.target.result.createObjectStore("tiles", { keyPath: "name" });
-    request.onsuccess = (e) => {
-      dbRef.current = e.target.result;
-      const q = e.target.result
-        .transaction("tiles")
-        .objectStore("tiles")
-        .getAll();
-      q.onsuccess = () =>
-        q.result.forEach((item) =>
+    for (const [id, doc] of Object.entries(levelDocs)) {
+      if (levelsRef.current[id] || !(doc.tiles?.length || doc.collisions?.length))
+        continue;
+      const names = new Set((doc.tiles || []).map((tile) => tile.asset));
+      if (![...names].every((name) => assetsRef.current.some((asset) => asset.name === name)))
+        continue;
+      const target = hydrateSketch(doc, assetsRef.current);
+      if (target.placed.size || target.collisions.size) {
+        levelsRef.current[id] = target;
+        if (id === level) {
+          placedRef.current = new Map(target.placed);
+          collisionsRef.current = new Set(target.collisions);
+          redraw((v) => v + 1);
+        }
+      }
+    }
+  }, [assets, levelDocs, level]);
+
+  useEffect(() => {
+    openAssetStore()
+      .then((db) => {
+        dbRef.current = db;
+        return readStoredAssets(db);
+      })
+      .then((items) =>
+        items.forEach((item) =>
           addAsset(
             item.blob,
             item.name,
             false,
             item.category || categoryForName(item.name),
           ),
-        );
-    };
+        ),
+      )
+      .catch(() => setStatus("Could not load the local asset library."));
   }, []);
-
-  useEffect(() => {
-    const preview = document.querySelector(".selection img");
-    if (!preview || !selected) return;
-    const c = document.createElement("canvas");
-    c.width = c.height = 62;
-    const ctx = c.getContext("2d");
-    ctx.imageSmoothingEnabled = false;
-    ctx.drawImage(
-      selected.image,
-      selectedRegion.x,
-      selectedRegion.y,
-      selectedRegion.w,
-      selectedRegion.h,
-      0,
-      0,
-      62,
-      62,
-    );
-    preview.src = c.toDataURL("image/png");
-  }, [selected, selectedRegion, tileSize]);
 
   useEffect(() => {
     const canvas = canvasRef.current,
       ctx = canvas?.getContext("2d");
     if (!ctx) return;
     ctx.imageSmoothingEnabled = false;
-    ctx.fillStyle = "#0b1820";
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
     for (const [k, cell] of placedRef.current) {
       const [x, y] = k.split(",").map(Number);
-      for (const placed of tilesFor(cell)) {
+      for (const placed of tilesFor(cell, documentLayers.filter((layer) => layer.visible))) {
         const asset = placed.asset || placed,
           sx = placed.sx ?? 0,
           sy = placed.sy ?? 0;
@@ -460,7 +528,7 @@ function App() {
     if (selectedObject) {
       const x = selectedObject.x,
         y = selectedObject.y;
-      ctx.strokeStyle = "#efb36c";
+      ctx.strokeStyle = "#19c6be";
       ctx.lineWidth = 2;
       ctx.beginPath();
       ctx.moveTo(x + t / 2, y + t / 2);
@@ -472,29 +540,13 @@ function App() {
       ctx.fillText("X", x + t * 2 + 4, y + t / 2);
       ctx.fillText("Y", x + t / 2 + 4, y - t - 4);
     }
-    if (grid) {
-      ctx.strokeStyle = "#213641";
-      ctx.lineWidth = 1;
-      for (let x = 0; x <= canvas.width; x += t) {
-        ctx.beginPath();
-        ctx.moveTo(x, 0);
-        ctx.lineTo(x, canvas.height);
-        ctx.stroke();
-      }
-      for (let y = 0; y <= canvas.height; y += t) {
-        ctx.beginPath();
-        ctx.moveTo(0, y);
-        ctx.lineTo(canvas.width, y);
-        ctx.stroke();
-      }
-    }
     ctx.fillStyle = "rgba(231,106,77,.4)";
     for (const k of collisionsRef.current) {
       const [x, y] = k.split(",").map(Number);
       ctx.fillRect(x * t, y * t, t, t);
     }
     if (cursorActive) {
-      ctx.strokeStyle = "#efb36c";
+      ctx.strokeStyle = "#19c6be";
       ctx.lineWidth = 2;
       ctx.strokeRect(cursor.x * t + 1, cursor.y * t + 1, t - 2, t - 2);
     }
@@ -532,6 +584,7 @@ function App() {
     version,
     levelDocs,
     objectSelection,
+    currentDoc.layers,
   ]);
 
   const cell = (e) => {
@@ -549,7 +602,7 @@ function App() {
       Math.max(
         0,
         Math.min(
-          Math.floor(576 / t) - 1,
+          levelHeight - 1,
           Math.floor(
             ((e.clientY - r.top) * canvasRef.current.height) / r.height / t,
           ),
@@ -563,6 +616,17 @@ function App() {
       x: ((e.clientX - r.left) * canvasRef.current.width) / r.width,
       y: ((e.clientY - r.top) * canvasRef.current.height) / r.height,
     };
+  };
+  const zoomBy = (setter, amount) =>
+    setter((value) => Math.max(0.25, Math.min(4, +(value + amount).toFixed(2))));
+  const onCanvasWheel = (e) => {
+    e.preventDefault();
+    zoomBy(setLevelZoom, e.deltaY < 0 ? 0.25 : -0.25);
+  };
+  const onPickerWheel = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    zoomBy(setPickerZoom, e.deltaY < 0 ? 0.25 : -0.25);
   };
   const objectAt = (point) => {
     for (const type of [...OBJECT_TYPES].reverse())
@@ -654,13 +718,7 @@ function App() {
     if (!value && !selection)
       return setStatus("No tile at the keyboard cursor to copy.");
     clipboardSizeRef.current = { w: area.w, h: area.h };
-    clipboardRef.current = [];
-    for (let y = area.y; y < area.y + area.h; y++)
-      for (let x = area.x; x < area.x + area.w; x++) {
-        const v = placedRef.current.get(key(x, y));
-        if (v)
-          clipboardRef.current.push({ x: x - area.x, y: y - area.y, value: v });
-      }
+    clipboardRef.current = copyTiles(placedRef.current, area);
     setStatus(`Copied ${area.w}×${area.h} tile area.`);
   };
   const cutSelection = () => {
@@ -680,6 +738,7 @@ function App() {
         placedRef.current.delete(k);
         collisionsRef.current.delete(k);
       }
+    resolveAutotile();
     bump();
     setStatus(`Cut ${area.w}×${area.h} tile area.`);
   };
@@ -687,24 +746,23 @@ function App() {
     if (!clipboardRef.current.length) return setStatus("Nothing copied.");
     const { w, h } = clipboardSizeRef.current;
     commit();
-    for (const item of clipboardRef.current) {
-      const x = lastTile.x + item.x,
-        y = lastTile.y + item.y;
-      if (x >= 0 && y >= 0 && x < levelWidth && y < Math.floor(576 / t))
-        placedRef.current.set(key(x, y), item.value);
-    }
+    pasteTiles(
+      placedRef.current,
+      clipboardRef.current,
+      lastTile,
+      levelWidth,
+      levelHeight,
+    );
     if (mode === "select") setSelection({ x: lastTile.x, y: lastTile.y, w, h });
+    resolveAutotile();
     bump();
     setStatus("Pasted tile selection.");
   };
   const deleteSelection = () => {
     if (!selection) return setStatus("Use Select mode to choose tiles first.");
     commit();
-    for (let y = selection.y; y < selection.y + selection.h; y++)
-      for (let x = selection.x; x < selection.x + selection.w; x++) {
-        placedRef.current.delete(key(x, y));
-        collisionsRef.current.delete(key(x, y));
-      }
+    deleteTiles(placedRef.current, collisionsRef.current, selection);
+    resolveAutotile();
     bump();
     setStatus("Deleted selected tiles.");
   };
@@ -716,38 +774,14 @@ function App() {
       x < 0 ||
       y < 0 ||
       x + selection.w > levelWidth ||
-      y + selection.h > Math.floor(576 / t)
+      y + selection.h > levelHeight
     )
       return setStatus("Selection is already at the level edge.");
     commit();
-    const moved = new Map(),
-      movedCollisions = new Set(),
-      inside = (x, y) =>
-        x >= selection.x &&
-        x < selection.x + selection.w &&
-        y >= selection.y &&
-        y < selection.y + selection.h;
-    for (let y = selection.y; y < selection.y + selection.h; y++)
-      for (let x = selection.x; x < selection.x + selection.w; x++) {
-        const from = key(x, y),
-          toX = x + dx,
-          toY = y + dy,
-          to = key(toX, toY),
-          value = placedRef.current.get(from),
-          hadCollision = collisionsRef.current.has(from);
-        if (placedRef.current.has(to) && !inside(toX, toY)) {
-          moved.set(from, value);
-          continue;
-        }
-        if (value) moved.set(to, value);
-        placedRef.current.delete(from);
-        collisionsRef.current.delete(from);
-        if (hadCollision) movedCollisions.add(to);
-      }
-    for (const [k, v] of moved) if (v) placedRef.current.set(k, v);
-    for (const k of movedCollisions) collisionsRef.current.add(k);
-    setSelection((s) => ({ ...s, x, y }));
+    const moved = moveTiles(placedRef.current, collisionsRef.current, selection, dx, dy);
+    setSelection((s) => ({ ...s, ...moved }));
     setLastTile((p) => ({ x: p.x + dx, y: p.y + dy }));
+    resolveAutotile();
     bump();
     return true;
   };
@@ -765,21 +799,77 @@ function App() {
     );
   };
   const paint = (e) => {
+    if (activeLayerDoc?.locked || activeLayerDoc?.visible === false)
+      return setStatus("Unlock and show the active layer before painting.");
     const [x, y] = cell(e),
       k = key(x, y);
     if (k === lastPaintRef.current) return;
     lastPaintRef.current = k;
-    if (buttonRef.current === 2 || eraser) {
-      const next = removeTile(placedRef.current.get(k), activeLayer);
-      if (next) placedRef.current.set(k, next);
-      else placedRef.current.delete(k);
-      collisionsRef.current.delete(k);
+    if (buttonRef.current === 2 || mode === "eraser" || eraser) {
+      deleteTiles(placedRef.current, collisionsRef.current, {
+        x,
+        y,
+        w: 1,
+        h: 1,
+      });
+      resolveAutotileAround(x, y);
     } else if (collision) collisionsRef.current.add(k);
     else stamp(x, y);
     setLastTile({ x, y });
     bump();
   };
+  const drawLine = (from, to) => {
+    const dx = Math.abs(to.x - from.x), dy = Math.abs(to.y - from.y);
+    const sx = from.x < to.x ? 1 : -1, sy = from.y < to.y ? 1 : -1;
+    let x = from.x, y = from.y, error = dx - dy;
+    while (true) {
+      stamp(x, y);
+      if (x === to.x && y === to.y) break;
+      const twice = error * 2;
+      if (twice > -dy) { error -= dy; x += sx; }
+      if (twice < dx) { error += dx; y += sy; }
+    }
+  };
+  const fill = (origin) => {
+    const target = layersFor(placedRef.current.get(key(origin.x, origin.y)))[activeLayer];
+    const same = (tile) => tile && target && (tile.asset || tile) === (target.asset || target) && (target.autotile ? tile.autotile?.x === target.autotile.x && tile.autotile?.y === target.autotile.y : tile.sx === target.sx && tile.sy === target.sy);
+    if (!target) {
+      const stack = [origin], seen = new Set();
+      while (stack.length) {
+        const point = stack.pop(), cellKey = key(point.x, point.y);
+        if (seen.has(cellKey) || point.x < 0 || point.y < 0 || point.x >= levelWidth || point.y >= levelHeight || layersFor(placedRef.current.get(cellKey))[activeLayer]) continue;
+        seen.add(cellKey); stamp(point.x, point.y);
+        stack.push({ x: point.x + 1, y: point.y }, { x: point.x - 1, y: point.y }, { x: point.x, y: point.y + 1 }, { x: point.x, y: point.y - 1 });
+      }
+      return;
+    }
+    const stack = [origin], seen = new Set();
+    while (stack.length) {
+      const point = stack.pop(), cellKey = key(point.x, point.y), tile = layersFor(placedRef.current.get(cellKey))[activeLayer];
+      if (seen.has(cellKey) || !same(tile)) continue;
+      seen.add(cellKey); stamp(point.x, point.y);
+      stack.push({ x: point.x + 1, y: point.y }, { x: point.x - 1, y: point.y }, { x: point.x, y: point.y + 1 }, { x: point.x, y: point.y - 1 });
+    }
+  };
+  const applyShape = (from, to) => {
+    if (mode === "line") drawLine(from, to);
+    else for (let y = Math.min(from.y, to.y); y <= Math.max(from.y, to.y); y++)
+      for (let x = Math.min(from.x, to.x); x <= Math.max(from.x, to.x); x++) stamp(x, y);
+  };
   const onDown = (e) => {
+    if (spaceRef.current && e.button === 0) {
+      e.preventDefault();
+      const stage = stageRef.current;
+      panRef.current = {
+        x: e.clientX,
+        y: e.clientY,
+        left: stage?.scrollLeft || 0,
+        top: stage?.scrollTop || 0,
+      };
+      e.currentTarget.setPointerCapture(e.pointerId);
+      e.currentTarget.style.cursor = "grabbing";
+      return;
+    }
     if (objectMode) return objectPointerDown(e);
     if (![0, 2].includes(e.button) || (mode === "select" && e.button !== 0))
       return;
@@ -798,15 +888,24 @@ function App() {
       setLastTile({ x, y });
       setSelectionStart({ x, y });
       setSelection({ x, y, w: 1, h: 1 });
+    } else if (mode === "fill") {
+      if (activeLayerDoc?.locked || activeLayerDoc?.visible === false) return setStatus("Unlock and show the active layer before painting.");
+      commit();
+      fill(Object.fromEntries([["x", cell(e)[0]], ["y", cell(e)[1]]]));
+      bump();
+    } else if (mode === "line" || mode === "rectangle") {
+      toolStartRef.current = Object.fromEntries([["x", cell(e)[0]], ["y", cell(e)[1]]]);
     } else if (mode === "eraser" || eraser || e.button === 2) {
       const [x, y] = cell(e);
       commit();
       removeObjectAt(canvasPoint(e));
-      const cellKey = key(x, y),
-        next = removeTile(placedRef.current.get(cellKey), activeLayer);
-      if (next) placedRef.current.set(cellKey, next);
-      else placedRef.current.delete(cellKey);
-      collisionsRef.current.delete(key(x, y));
+      deleteTiles(placedRef.current, collisionsRef.current, {
+        x,
+        y,
+        w: 1,
+        h: 1,
+      });
+      resolveAutotileAround(x, y);
       setLastTile({ x, y });
       bump();
     } else {
@@ -814,17 +913,53 @@ function App() {
       paint(e);
     }
   };
-  const onMove = (e) =>
-    objectMode
+  const onStageDown = (e) => {
+    if (!spaceRef.current || e.target === canvasRef.current || e.button !== 0) return;
+    e.preventDefault();
+    panRef.current = {
+      x: e.clientX,
+      y: e.clientY,
+      left: stageRef.current?.scrollLeft || 0,
+      top: stageRef.current?.scrollTop || 0,
+    };
+    e.currentTarget.setPointerCapture(e.pointerId);
+    e.currentTarget.style.cursor = "grabbing";
+  };
+  const onMove = (e) => {
+    if (panRef.current) {
+      e.preventDefault();
+      const stage = stageRef.current;
+      if (stage) {
+        stage.scrollLeft = panRef.current.left - (e.clientX - panRef.current.x);
+        stage.scrollTop = panRef.current.top - (e.clientY - panRef.current.y);
+      }
+      return;
+    }
+    return objectMode
       ? objectPointerMove(e)
       : paintingRef.current &&
         (mode === "select" ? updateSelection(e) : paint(e));
-  const onUp = (e) =>
-    objectMode
+  };
+  const onUp = (e) => {
+    if (panRef.current) {
+      panRef.current = null;
+      e.currentTarget.style.cursor = "crosshair";
+      e.currentTarget.releasePointerCapture?.(e.pointerId);
+      return;
+    }
+    if (!objectMode && paintingRef.current && (mode === "line" || mode === "rectangle") && toolStartRef.current) {
+      const [x, y] = cell(e);
+      commit();
+      applyShape(toolStartRef.current, { x, y });
+      toolStartRef.current = null;
+      bump();
+    }
+    return objectMode
       ? objectPointerUp(e)
       : ((paintingRef.current = false),
         setSelectionStart(null),
         e.currentTarget.releasePointerCapture?.(e.pointerId));
+  };
   const importAsset = async (file) => {
     const form = new FormData();
     form.append("image", file);
@@ -883,61 +1018,68 @@ function App() {
       ),
     };
   };
-  const pickSubTile = (e) => {
-    if (!selected) return;
-    const p = pickerCell(e);
-    setSelectedRegion({ x: p.x * t, y: p.y * t, w: t, h: t });
-    setStatus(`Selected ${selected.name} tile (${p.x}, ${p.y}).`);
-  };
   const beginPicker = (e) => {
     if (!selected) return;
     e.preventDefault();
     e.currentTarget.setPointerCapture?.(e.pointerId);
     const p = pickerCell(e);
-    setPickerDragStart(p);
     setSelectedRegion({ x: p.x * t, y: p.y * t, w: t, h: t });
+    setStatus(`Selected tile ${p.x + 1},${p.y + 1}.`);
   };
   const dragPicker = (e) => {
-    if (!pickerDragStart) return;
+    if (!(e.buttons & 1)) return;
     e.preventDefault();
-    const p = pickerCell(e),
-      x = Math.min(p.x, pickerDragStart.x),
-      y = Math.min(p.y, pickerDragStart.y),
-      w = Math.abs(p.x - pickerDragStart.x) + 1,
-      h = Math.abs(p.y - pickerDragStart.y) + 1;
-    setSelectedRegion({ x: x * t, y: y * t, w: w * t, h: h * t });
-    setStatus(`Selected ${w}×${h} tile slice.`);
+    const p = pickerCell(e);
+    setSelectedRegion({ x: p.x * t, y: p.y * t, w: t, h: t });
   };
   const endPicker = (e) => {
     e.currentTarget.releasePointerCapture?.(e.pointerId);
-    setPickerDragStart(null);
   };
   const stamp = (x, y) => {
-    if (!selected) return;
-    for (let sy = 0; sy < selectedRegion.h; sy += t)
-      for (let sx = 0; sx < selectedRegion.w; sx += t) {
-        const dx = x + sx / t,
-          dy = y + sy / t;
-        if (dx >= 0 && dy >= 0 && dx < levelWidth && dy < 576 / t)
-          placedRef.current.set(
-            key(dx, dy),
-            putTile(placedRef.current.get(key(dx, dy)), activeLayer, {
-              asset: selected,
-              sx: selectedRegion.x + sx,
-              sy: selectedRegion.y + sy,
-            }),
-          );
-      }
+    if (!selected || x < 0 || y < 0 || x >= levelWidth || y >= levelHeight) return;
+    placedRef.current.set(
+      key(x, y),
+      putTile(placedRef.current.get(key(x, y)), activeLayer, {
+        asset: selected,
+        sx: selectedRegion.x,
+        sy: selectedRegion.y,
+        attributes: tileAttributes,
+        autotile: activeLayerDoc?.type === "autotile"
+          ? { x: selectedRegion.x, y: selectedRegion.y }
+          : undefined,
+      }),
+    );
+    resolveAutotileAround(x, y);
   };
-  useEffect(() => {
-    document.querySelectorAll(".picker-selection").forEach((el) => {
-      const scale = el.closest(".tileset-picker-large")
-        ? modalPickerScale
-        : pickerScale;
-      el.style.width = `${selectedRegion.w * scale}px`;
-      el.style.height = `${selectedRegion.h * scale}px`;
-    });
-  }, [selectedRegion, pickerScale, modalPickerScale]);
+  const resolveAutotileAt = (x, y) => {
+    const cellKey = key(x, y), tile = layersFor(placedRef.current.get(cellKey))[activeLayer];
+    if (!tile?.autotile) return;
+    const base = tile.autotile, asset = tile.asset || tile;
+    const connected = (nx, ny) => {
+      const other = layersFor(placedRef.current.get(key(nx, ny)))[activeLayer];
+      return other?.autotile && (other.asset || other) === asset && other.autotile.x === base.x && other.autotile.y === base.y;
+    };
+    const left = connected(x - 1, y), right = connected(x + 1, y), up = connected(x, y - 1), down = connected(x, y + 1);
+    const column = left && right ? 1 : left ? 2 : right ? 0 : 1;
+    const row = up && down ? 1 : up ? 2 : down ? 0 : 1;
+    const hasThreeByThree = base.x + t * 3 <= asset.image.width && base.y + t * 3 <= asset.image.height;
+    placedRef.current.set(cellKey, putTile(placedRef.current.get(cellKey), activeLayer, {
+      ...tile,
+      sx: hasThreeByThree ? base.x + column * t : base.x,
+      sy: hasThreeByThree ? base.y + row * t : base.y,
+    }));
+  };
+  const resolveAutotileAround = (x, y) => {
+    if (activeLayerDoc?.type !== "autotile") return;
+    for (const [dx, dy] of [[0, 0], [1, 0], [-1, 0], [0, 1], [0, -1]]) resolveAutotileAt(x + dx, y + dy);
+  };
+  const resolveAutotile = () => {
+    if (activeLayerDoc?.type !== "autotile") return;
+    for (const cellKey of placedRef.current.keys()) {
+      const [x, y] = cellKey.split(",").map(Number);
+      resolveAutotileAt(x, y);
+    }
+  };
   const fix = async () => {
     if (!sourceFile) return setStatus("Choose an image first.");
     if (!["localhost", "127.0.0.1"].includes(window.location.hostname))
@@ -986,24 +1128,18 @@ function App() {
 
   useEffect(() => {
     const keydown = (e) => {
+      const editable = /INPUT|TEXTAREA|SELECT/.test(e.target.tagName);
+      if (e.code === "Space" && !editable) {
+        e.preventDefault();
+        spaceRef.current = true;
+        return;
+      }
       const arrows = ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"],
         k = e.key.toLowerCase(),
         mod = e.metaKey || e.ctrlKey;
       if (e.key === "Control") {
         setCursor(lastTile);
         setCursorActive(true);
-        return;
-      }
-      if (selected && e.altKey && arrows.includes(e.key)) {
-        e.preventDefault();
-        const dw = e.key === "ArrowRight" ? t : e.key === "ArrowLeft" ? -t : 0,
-          dh = e.key === "ArrowDown" ? t : e.key === "ArrowUp" ? -t : 0;
-        setSelectedRegion((r) => ({
-          ...r,
-          w: Math.max(t, r.w + dw),
-          h: Math.max(t, r.h + dh),
-        }));
-        setStatus("Picker slice resized with Option + arrows.");
         return;
       }
       if (mod && k === "z") {
@@ -1026,7 +1162,7 @@ function App() {
           return;
         }
         const maxX = levelWidth - 1,
-          maxY = Math.floor(576 / t) - 1,
+          maxY = levelHeight - 1,
           next = { ...cursor };
         if (e.key === "ArrowLeft") next.x = Math.max(0, next.x - 1);
         if (e.key === "ArrowRight") next.x = Math.min(maxX, next.x + 1);
@@ -1038,13 +1174,12 @@ function App() {
         commit();
         const cellKey = key(next.x, next.y);
         if (eraser) {
-          const nextCell = removeTile(
-            placedRef.current.get(cellKey),
-            activeLayer,
-          );
-          if (nextCell) placedRef.current.set(cellKey, nextCell);
-          else placedRef.current.delete(cellKey);
-          collisionsRef.current.delete(cellKey);
+          deleteTiles(placedRef.current, collisionsRef.current, {
+            x: next.x,
+            y: next.y,
+            w: 1,
+            h: 1,
+          });
         } else if (collision) collisionsRef.current.add(cellKey);
         else if (selected)
           placedRef.current.set(
@@ -1064,23 +1199,13 @@ function App() {
         setDebug((v) => !v);
         return;
       }
-      if (!mod && k === "g") {
-        switchLevel("gym");
-        return;
-      }
-      if (!mod && k === "l") {
-        switchLevel("main");
-        return;
-      }
-      if (pickerOpen && k === "enter") {
+      if (e.altKey && !mod && e.code === "KeyL" && !editable) {
         e.preventDefault();
-        setPickerOpen(false);
-        setPickerDragStart(null);
+        setLayerPanelOpen((v) => !v);
         return;
       }
       if (k === "escape") {
-        setPickerOpen(false);
-        setPickerDragStart(null);
+        setMenuOpen(false);
         setMode("brush");
         setEraser(false);
         setSelection(null);
@@ -1116,16 +1241,35 @@ function App() {
         setMode("select");
         setEraser(false);
         setStatus("Select mode: drag a tile rectangle.");
+      } else if (!mod && k === "r") {
+        setMode("rectangle");
+        setEraser(false);
+        setStatus("Rectangle mode.");
+      } else if (!mod && k === "i") {
+        setMode("line");
+        setEraser(false);
+        setStatus("Line mode.");
+      } else if (!mod && k === "f") {
+        setMode("fill");
+        setEraser(false);
+        setStatus("Fill mode.");
       }
     };
     const keyup = (e) => {
+      if (e.code === "Space") spaceRef.current = false;
       if (e.key === "Control") setCursorActive(false);
+    };
+    const blur = () => {
+      spaceRef.current = false;
+      panRef.current = null;
     };
     document.addEventListener("keydown", keydown);
     document.addEventListener("keyup", keyup);
+    window.addEventListener("blur", blur);
     return () => {
       document.removeEventListener("keydown", keydown);
       document.removeEventListener("keyup", keyup);
+      window.removeEventListener("blur", blur);
     };
   }, [
     cursor,
@@ -1137,7 +1281,6 @@ function App() {
     activeLayer,
     lastTile,
     selection,
-    pickerOpen,
   ]);
 
   const deleteAsset = (asset) => {
@@ -1153,7 +1296,7 @@ function App() {
     }
     assetsRef.current = assetsRef.current.filter((a) => a !== asset);
     setAssets(assetsRef.current);
-    removePersisted(asset.name);
+    removePersistedAsset(dbRef.current, asset.name);
     if (selected === asset) select(null);
     bump();
     setStatus(`Deleted ${asset.name}.`);
@@ -1179,15 +1322,30 @@ function App() {
   const exportLevelJson = () => {
     download(
       currentDoc.metadata.id + ".level.json",
-      JSON.stringify(currentDoc, null, 2),
+      JSON.stringify({ ...currentDoc, ...serializeSketch(placedRef.current, exportCollisions, documentLayers) }, null, 2),
     );
     setStatus("Downloaded structured level data.");
+  };
+  const exportPhaserTilemap = () => {
+    const tilemap = createPhaserTilemap({
+      placed: placedRef.current,
+      collisions: exportCollisions,
+      levelWidth,
+      levelHeight,
+      layers: documentLayers,
+      tileSize: t,
+    });
+    download(
+      currentDoc.metadata.id + ".phaser.tilemap.json",
+      JSON.stringify(tilemap, null, 2),
+    );
+    setStatus("Downloaded Phaser tilemap JSON.");
   };
   const exportScene = (name) => {
     const used = [
         ...new Set(
           [...placedRef.current.values()]
-            .flatMap(tilesFor)
+            .flatMap((cell) => tilesFor(cell, documentLayers.filter((layer) => layer.visible)))
             .map((v) => v.asset || v),
         ),
       ],
@@ -1209,7 +1367,9 @@ function App() {
     let i = 0;
     for (const [k, cell] of placedRef.current) {
       const [x, y] = k.split(",").map(Number);
-      for (const placed of tilesFor(cell)) {
+      for (const layer of documentLayers.filter((layer) => layer.visible)) {
+        const placed = layersFor(cell)[layer.id];
+        if (!placed) continue;
         const a = placed.asset || placed,
           sx = placed.sx ?? 0,
           sy = placed.sy ?? 0;
@@ -1220,9 +1380,11 @@ function App() {
           `region_rect = Rect2(${sx}, ${sy}, ${t}, ${t})`,
           `position = Vector2(${x * t + t / 2}, ${y * t + t / 2})`,
         );
+        for (const [attribute, value] of Object.entries(placed.attributes || {}))
+          if (value !== undefined) lines.push(`metadata/${attribute} = ${JSON.stringify(value)}`);
       }
     }
-    for (const k of collisionsRef.current) {
+    for (const k of exportCollisions) {
       const [x, y] = k.split(",").map(Number);
       lines.push(
         `\n[node name="Collision_${x}_${y}" type="StaticBody2D" parent="."]`,
@@ -1238,9 +1400,93 @@ function App() {
   return (
     <>
       <header>
-        <h1>Terrain + Props Editor</h1>
-        <span>{status}</span>
+        <h1>OpenTile</h1>
+        <button
+          className="header-menu"
+          aria-haspopup="dialog"
+          aria-expanded={menuOpen}
+          onClick={() => setMenuOpen(true)}
+        >
+          <Menu size={16} /> Menu
+        </button>
+        <span role="status">{status}</span>
       </header>
+      {menuOpen && (
+        <div
+          className="editor-menu-modal"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Editor menu"
+          onPointerDown={(event) => {
+            if (event.target === event.currentTarget) setMenuOpen(false);
+          }}
+        >
+          <div className="editor-menu-card">
+            <div className="editor-menu-head">
+              <strong>Editor menu</strong>
+              <button onClick={() => setMenuOpen(false)} aria-label="Close editor menu">×</button>
+            </div>
+            <section>
+              <h2>Project</h2>
+              <div className="menu-actions">
+                <button onClick={() => {
+                  const id = prompt("Level id", "level-" + (Object.keys(levelDocs).length + 1));
+                  if (!id || levelDocs[id]) return;
+                  const docs = { ...levelDocs, [id]: newLevelDoc(id, id) };
+                  levelsRef.current[id] = { placed: new Map(), collisions: new Set() };
+                  persistLevels(docs);
+                  switchLevel(id);
+                  setMenuOpen(false);
+                }}><Plus size={15} /> New level</button>
+                <button onClick={() => {
+                  persistSketch();
+                  setStatus("Saved " + currentDoc.metadata.name + ".");
+                }}><Save size={15} /> Save</button>
+                <button onClick={() => {
+                  const id = prompt("Save level as", currentDoc.metadata.id + "-copy");
+                  if (!id || levelDocs[id]) return;
+                  const sketch = serializeSketch(placedRef.current, collisionsRef.current);
+                  persistLevels({ ...levelDocs, [id]: { ...currentDoc, ...sketch, metadata: { ...currentDoc.metadata, id, name: id } } });
+                  levelsRef.current[id] = { placed: new Map(placedRef.current), collisions: new Set(collisionsRef.current) };
+                  setLevel(id);
+                  setStatus("Saved as " + id + ".");
+                  setMenuOpen(false);
+                }}><FilePlus2 size={15} /> Save as</button>
+              </div>
+            </section>
+            <section>
+              <h2>Map</h2>
+              <div className="menu-fields">
+                <label>Width <input type="number" min="24" value={levelWidth} onChange={(e) => updateCurrentDoc((doc) => ({ ...doc, metadata: { ...doc.metadata, width: Math.max(24, Number(e.target.value) || 24) } }))} /></label>
+                <label>Height <input type="number" min="1" value={levelHeight} onChange={(e) => updateCurrentDoc((doc) => ({ ...doc, metadata: { ...doc.metadata, height: Math.max(1, Number(e.target.value) || 1) } }))} /></label>
+              </div>
+              <div className="menu-actions menu-resize" aria-label="Resize map">
+                <button onClick={() => updateCurrentDoc((doc) => ({ ...doc, metadata: { ...doc.metadata, width: Math.max(24, levelWidth - 1) } }))}>− Width</button>
+                <button onClick={() => updateCurrentDoc((doc) => ({ ...doc, metadata: { ...doc.metadata, width: levelWidth + 1 } }))}>+ Width</button>
+                <button onClick={() => updateCurrentDoc((doc) => ({ ...doc, metadata: { ...doc.metadata, height: Math.max(1, levelHeight - 1) } }))}>− Height</button>
+                <button onClick={() => updateCurrentDoc((doc) => ({ ...doc, metadata: { ...doc.metadata, height: levelHeight + 1 } }))}>+ Height</button>
+              </div>
+            </section>
+            <section>
+              <h2>Canvas</h2>
+              <label>Tile size <input type="number" value={tileSize} min="8" step="8" onChange={(e) => setTileSize(e.target.value)} /></label>
+              <label className="menu-check"><input type="checkbox" checked={collision} onChange={(e) => setCollision(e.target.checked)} /> Paint collision</label>
+              <label className="menu-check"><input type="checkbox" checked={grid} onChange={(e) => setGrid(e.target.checked)} /> Grid</label>
+              <label className="menu-check"><input type="checkbox" checked={debug} onChange={(e) => setDebug(e.target.checked)} /> Debug</label>
+            </section>
+            <section>
+              <h2>Export</h2>
+              <div className="menu-actions">
+                <button onClick={exportLevelPng}><Download size={15} /> PNG</button>
+                <button onClick={exportLevelJson}><FileJson size={15} /> Level JSON</button>
+                <button onClick={exportPhaserTilemap}><FileJson size={15} /> Phaser JSON</button>
+                <button onClick={() => assets.forEach((asset) => { const link = document.createElement("a"); link.href = asset.url; link.download = asset.name; link.click(); })}><Download size={15} /> Assets</button>
+                <button onClick={() => exportScene("level.tscn")}><Box size={15} /> Godot scene</button>
+              </div>
+            </section>
+          </div>
+        </div>
+      )}
       <main>
         <AssetLibrary
           assetCategory={assetCategory}
@@ -1254,17 +1500,21 @@ function App() {
         />
         <LevelCanvas
           canvasRef={canvasRef}
+          onCanvasWheel={onCanvasWheel}
           collisionsCount={collisionsRef.current.size}
           copySelection={copySelection}
           currentDoc={currentDoc}
           debug={debug}
+          grid={grid}
           erase={() => {
             setMode("eraser");
             setEraser(true);
           }}
           levelWidth={levelWidth}
+          levelHeight={levelHeight}
           mode={mode}
           onDown={onDown}
+          onStageDown={onStageDown}
           onMove={onMove}
           onUp={onUp}
           pasteSelection={pasteSelection}
@@ -1272,128 +1522,11 @@ function App() {
           setEraser={setEraser}
           setMode={setMode}
           t={t}
-          zoom={zoom}
+          stageRef={stageRef}
+          zoom={levelZoom}
         />
         <aside className="terrain-sidebar">
           <div className="terrain-action-rail" aria-label="Editor actions">
-            <span className="rail-label">LEVEL</span>
-            <button
-              title="Create new level"
-              aria-label="Create new level"
-              onClick={() => {
-                const id = prompt(
-                  "Level id",
-                  "level-" + (Object.keys(levelDocs).length + 1),
-                );
-                if (!id) return;
-                const docs = { ...levelDocs, [id]: newLevelDoc(id, id) };
-                persistLevels(docs);
-                switchLevel(id);
-              }}
-            >
-              <Plus size={16} />
-            </button>
-            <button
-              title="Save current level"
-              aria-label="Save current level"
-              onClick={() => {
-                persistLevels(levelDocs);
-                setStatus("Saved " + currentDoc.metadata.name + ".");
-              }}
-            >
-              <Save size={16} />
-            </button>
-            <button
-              title="Save as new level"
-              aria-label="Save as new level"
-              onClick={() => {
-                const id = prompt(
-                  "Save level as",
-                  currentDoc.metadata.id + "-copy",
-                );
-                if (!id) return;
-                persistLevels({
-                  ...levelDocs,
-                  [id]: {
-                    ...currentDoc,
-                    metadata: { ...currentDoc.metadata, id, name: id },
-                  },
-                });
-                setLevel(id);
-                setStatus("Saved as " + id + ".");
-              }}
-            >
-              <FilePlus2 size={16} />
-            </button>
-            <span className="rail-label">OBJECTS</span>
-            <button
-              className={objectMode ? "active" : ""}
-              title="Object select mode"
-              aria-label="Object select mode"
-              onClick={() => setObjectMode((v) => !v)}
-            >
-              <Crosshair size={16} />
-            </button>
-            {OBJECT_TYPES.map((type) => (
-              <button
-                key={type}
-                title={"Add " + type}
-                aria-label={"Add " + type}
-                onClick={() => addObject(type)}
-              >
-                {type === "platform" ? (
-                  <Square size={15} />
-                ) : type === "prop" ? (
-                  <Box size={15} />
-                ) : type === "pickup" ? (
-                  <Circle size={15} />
-                ) : type === "enemy" ? (
-                  <Circle size={15} />
-                ) : (
-                  <DoorOpen size={15} />
-                )}
-              </button>
-            ))}
-            <span className="rail-label">VIEW</span>
-            <button
-              title="Fix pixel grid"
-              aria-label="Fix pixel grid"
-              onClick={fix}
-            >
-              <WandSparkles size={16} />
-            </button>
-            <button
-              title="Remove background"
-              aria-label="Remove background"
-              onClick={eraseBackground}
-            >
-              <Circle size={16} />
-            </button>
-            <button
-              title="Zoom out"
-              aria-label="Zoom out"
-              onClick={() =>
-                setZoom((z) => Math.max(0.5, +(z - 0.25).toFixed(2)))
-              }
-            >
-              <ZoomOut size={16} />
-            </button>
-            <button
-              title="Reset zoom"
-              aria-label="Reset zoom"
-              onClick={() => setZoom(1)}
-            >
-              <RotateCcw size={14} />
-            </button>
-            <button
-              title="Zoom in"
-              aria-label="Zoom in"
-              onClick={() =>
-                setZoom((z) => Math.min(3, +(z + 0.25).toFixed(2)))
-              }
-            >
-              <ZoomIn size={16} />
-            </button>
             <span className="rail-label">EDIT</span>
             <button
               className={mode === "brush" ? "active" : ""}
@@ -1428,6 +1561,9 @@ function App() {
             >
               <Eraser size={16} />
             </button>
+            <button className={mode === "rectangle" ? "active" : ""} title="Rectangle (R)" aria-label="Rectangle (R)" onClick={() => { setMode("rectangle"); setEraser(false); }}>□</button>
+            <button className={mode === "line" ? "active" : ""} title="Line (I)" aria-label="Line (I)" onClick={() => { setMode("line"); setEraser(false); }}>╱</button>
+            <button className={mode === "fill" ? "active" : ""} title="Fill (F)" aria-label="Fill (F)" onClick={() => { setMode("fill"); setEraser(false); }}>▧</button>
             <button
               title="Copy selection (Ctrl/⌘ C)"
               aria-label="Copy selection"
@@ -1442,30 +1578,6 @@ function App() {
             >
               <ClipboardPaste size={16} />
             </button>
-            <button
-              title="Import image"
-              aria-label="Import image"
-              onClick={() => document.querySelector("input[type=file]").click()}
-            >
-              <Upload size={16} />
-            </button>
-            <button
-              title="Save scene"
-              aria-label="Save scene"
-              onClick={() => exportScene("level.tscn")}
-            >
-              <Save size={16} />
-            </button>
-            <button
-              title="Save scene as"
-              aria-label="Save scene as"
-              onClick={() => {
-                const n = prompt("Scene filename", "level.tscn");
-                if (n) exportScene(n.endsWith(".tscn") ? n : n + ".tscn");
-              }}
-            >
-              <FilePlus2 size={16} />
-            </button>
             <button title="Undo" aria-label="Undo" onClick={undo}>
               <RotateCcw size={16} />
             </button>
@@ -1475,104 +1587,38 @@ function App() {
             <button
               title="Clear level"
               aria-label="Clear level"
-              onClick={() => {
-                if (!placedRef.current.size && !collisionsRef.current.size)
-                  return;
-                commit();
-                placedRef.current.clear();
-                collisionsRef.current.clear();
-                bump();
-              }}
+              onClick={clearLevel}
             >
               <Trash2 size={16} />
             </button>
-            <span className="rail-label">EXPORT</span>
-            <button
-              title="Export level PNG"
-              aria-label="Export level PNG"
-              onClick={exportLevelPng}
-            >
-              <Download size={16} />
-            </button>
-            <button
-              title="Export structured level JSON"
-              aria-label="Export structured level JSON"
-              onClick={exportLevelJson}
-            >
-              <FileJson size={16} />
-            </button>
-            <button
-              title="Download assets"
-              aria-label="Download assets"
-              onClick={() =>
-                assets.forEach((a) => {
-                  const link = document.createElement("a");
-                  link.href = a.url;
-                  link.download = a.name;
-                  link.click();
-                })
-              }
-            >
-              <Download size={16} />
-            </button>
-            <button
-              title="Export Godot scene"
-              aria-label="Export Godot scene"
-              onClick={() => exportScene("level.tscn")}
-            >
-              <Box size={16} />
-            </button>
           </div>
-          <h2>Terrain</h2>
-          <div className="eyebrow">Level file</div>
-          <select
-            value={level}
-            onChange={(e) => switchLevel(e.target.value)}
-            aria-label="Load level"
-          >
-            {Object.values(levelDocs).map((doc) => (
-              <option key={doc.metadata.id} value={doc.metadata.id}>
-                {doc.metadata.name}
-              </option>
+          <details className="layer-panel" open={layerPanelOpen} onToggle={(e) => setLayerPanelOpen(e.currentTarget.open)}>
+            <summary>Layers · hide/show (⌥L)</summary>
+            {documentLayers.map((layer, index) => (
+              <div className={'layer-row ' + (activeLayer === layer.id ? 'active' : '')} key={layer.id}>
+                {(() => {
+                  const tile = [...placedRef.current.values()].map((cell) => layersFor(cell)[layer.id]).find(Boolean);
+                  return tile ? <img className="layer-thumb" src={(tile.asset || tile).url} alt="" /> : <span className="layer-thumb" />;
+                })()}
+                <button className="layer-name" onClick={() => selectLayer(layer.id)}>{layer.name}</button>
+                <button aria-label={layer.visible ? 'Hide layer' : 'Show layer'} title={layer.visible ? 'Hide layer' : 'Show layer'} onClick={() => updateLayers((layers) => layers.map((item) => item.id === layer.id ? { ...item, visible: !item.visible } : item))}>{layer.visible ? <Eye size={14} /> : <EyeOff size={14} />}</button>
+                <button aria-label={layer.locked ? 'Unlock layer' : 'Lock layer'} title={layer.locked ? 'Unlock layer' : 'Lock layer'} onClick={() => updateLayers((layers) => layers.map((item) => item.id === layer.id ? { ...item, locked: !item.locked } : item))}>{layer.locked ? <Lock size={14} /> : <Unlock size={14} />}</button>
+                <button aria-label="Toggle layer collision" className={layer.collision ? 'collision-badge' : ''} title="Toggle layer collision" onClick={() => updateLayers((layers) => layers.map((item) => item.id === layer.id ? { ...item, collision: !item.collision } : item))}><Shield size={14} /></button>
+                <details className="layer-more"><summary aria-label="More layer options" title="More layer options"><MoreHorizontal size={14} /></summary><button onClick={() => { const name = prompt('Layer name', layer.name); if (name) updateLayers((layers) => layers.map((item) => item.id === layer.id ? { ...item, name } : item)); }}>Rename</button><button onClick={() => duplicateLayer(layer)}>Duplicate</button><button onClick={() => updateLayers((layers) => layers.map((item) => item.id === layer.id ? { ...item, type: item.type === "autotile" ? "tile" : "autotile", rule: item.type === "autotile" ? undefined : { center: "required", cardinal: "required-or-empty", corners: "ignored" } } : item))}>{layer.type === "autotile" ? "Regular tile" : "Autotile"}</button><button onClick={() => moveLayer(index, 1)}>Move up</button><button onClick={() => moveLayer(index, -1)}>Move down</button><button onClick={() => { const entry = prompt("Property as key=value"); if (!entry?.includes("=")) return; const [name, value] = entry.split(/=(.*)/s); updateLayers((layers) => layers.map((item) => item.id === layer.id ? { ...item, properties: { ...item.properties, [name.trim()]: value } } : item)); }}>Property</button><button className="danger" onClick={() => deleteLayer(layer)}>Delete</button></details>
+              </div>
             ))}
-          </select>
-          <label>
-            Width (tiles)
-            <input
-              type="number"
-              min="24"
-              value={levelWidth}
-              onChange={(e) =>
-                updateCurrentDoc((doc) => ({
-                  ...doc,
-                  metadata: {
-                    ...doc.metadata,
-                    width: Math.max(24, Number(e.target.value) || 24),
-                  },
-                }))
-              }
-            />
-          </label>
-          <label>
-            Paint layer
-            <select
-              value={activeLayer}
-              onChange={(event) => setActiveLayer(event.target.value)}
-            >
-              {TILE_LAYERS.map((layer) => (
-                <option key={layer} value={layer}>
-                  {layer}
-                </option>
-              ))}
-            </select>
-          </label>
-          <small>
-            Layers show through transparent PNGs. Use Remove background for
-            opaque source images.
-          </small>
+            <div className="layer-add"><button onClick={() => addLayer()}>+ Layer</button><button onClick={() => addLayer("autotile")}>+ Autotile layer</button></div>
+            {activeLayerDoc?.type === "autotile" && <small>Selected tile is the top-left of a 3×3 autotile block.</small>}
+          </details>
+          <details className="sidebar-section tile-attributes">
+            <summary>Tile attributes</summary>
+            {[["collision", "Collision"], ["hazard", "Hazard"], ["ladder", "Ladder"], ["spawn", "Spawn"], ["damage", "Damage"], ["animated", "Animated"]].map(([key, label]) => <label className="row" key={key}><input type="checkbox" checked={!!tileAttributes[key]} onChange={(event) => setTileAttributes((value) => ({ ...value, [key]: event.target.checked || undefined }))} />{label}</label>)}
+            <div className="row"><input aria-label="Custom tile property name" placeholder="key" value={customAttributeKey} onChange={(event) => setCustomAttributeKey(event.target.value)} /><input aria-label="Custom tile property value" placeholder="value" value={customAttributeValue} onChange={(event) => setCustomAttributeValue(event.target.value)} /></div>
+            <button onClick={() => { if (!customAttributeKey) return; setTileAttributes((value) => ({ ...value, [customAttributeKey]: customAttributeValue })); setCustomAttributeKey(""); setCustomAttributeValue(""); }}>Add tile property</button>
+          </details>
           {selectedObject && (
-            <div className="object-inspector">
-              <strong>{objectSelection.type}</strong>
+            <details className="sidebar-section object-inspector" open>
+              <summary>{objectSelection.type} inspector</summary>
               <label>
                 X
                 <input
@@ -1703,157 +1749,67 @@ function App() {
               <button className="danger" onClick={deleteSelectedObject}>
                 Delete object
               </button>
-            </div>
+            </details>
           )}
-          <div className="level-tabs">
-            <button
-              className={level === "main" ? "active" : ""}
-              onClick={() => switchLevel("main")}
-            >
-              Main Level
-            </button>
-            <button
-              className={level === "gym" ? "active" : ""}
-              onClick={() => switchLevel("gym")}
-            >
-              Gym
-            </button>
-          </div>
+          <details className="sidebar-section selected-tile-section" open>
+          <summary>Selected tile & tileset</summary>
           <div className="eyebrow">Selected tile</div>
           <div className="selection">
-            <img src={selected?.url || ""} alt="No tile selected" />
+            <div className="selection-preview" onWheel={onPickerWheel}>
+              {selected && (
+                <div
+                  role="img"
+                  aria-label={`${selected.name} selected tile`}
+                  style={{
+                    width: `${selectedRegion.w * pickerZoom}px`,
+                    height: `${selectedRegion.h * pickerZoom}px`,
+                    backgroundImage: `url(${selected.url})`,
+                    backgroundPosition: `${-selectedRegion.x * pickerZoom}px ${-selectedRegion.y * pickerZoom}px`,
+                    backgroundSize: `${selected.image.width * pickerZoom}px ${selected.image.height * pickerZoom}px`,
+                  }}
+                />
+              )}
+            </div>
             <strong>{selected?.name || "Nothing selected"}</strong>
           </div>
           <div className="eyebrow">Tileset picker</div>
-          <small>
-            Click to choose a tile. Use the large picker to drag a rectangular
-            slice.
-          </small>
+          <small>Click or drag to choose one tile. Scroll here to zoom this tileset only.</small>
           {selected && (
-            <>
-              <div className="tileset-picker">
+            <div
+              className="tileset-picker"
+              style={{ "--grid-size": `${t * pickerZoom}px` }}
+              onWheel={onPickerWheel}
+            >
+              <div
+                className="tileset-plane"
+                style={{
+                  width: `${selected.image.width * pickerZoom}px`,
+                  height: `${selected.image.height * pickerZoom}px`,
+                }}
+              >
                 <img
                   src={selected.url}
                   alt={`${selected.name} tileset`}
-                  onLoad={(e) =>
-                    setPickerScale(
-                      e.currentTarget.clientWidth /
-                        e.currentTarget.naturalWidth,
-                    )
-                  }
-                  onClick={pickSubTile}
+                  onPointerDown={beginPicker}
+                  onPointerMove={dragPicker}
+                  onPointerUp={endPicker}
+                  onPointerCancel={endPicker}
                   draggable={false}
                   onDragStart={(e) => e.preventDefault()}
                 />
                 <div
                   className="picker-selection"
                   style={{
-                    left: `${selectedRegion.x * pickerScale}px`,
-                    top: `${selectedRegion.y * pickerScale}px`,
-                    width: `${t * pickerScale}px`,
-                    height: `${t * pickerScale}px`,
+                    left: `${selectedRegion.x * pickerZoom}px`,
+                    top: `${selectedRegion.y * pickerZoom}px`,
+                    width: `${selectedRegion.w * pickerZoom}px`,
+                    height: `${selectedRegion.h * pickerZoom}px`,
                   }}
                 />
               </div>
-              <button
-                className="picker-open"
-                onClick={() => setPickerOpen(true)}
-              >
-                <Box size={15} /> Open picker
-              </button>
-            </>
-          )}
-          {selected && pickerOpen && (
-            <div
-              className="picker-modal"
-              role="dialog"
-              aria-modal="true"
-              aria-label="Tileset picker"
-            >
-              <div className="picker-modal-card">
-                <div className="picker-modal-head">
-                  <strong>{selected.name}</strong>
-                  <button
-                    onClick={() => setPickerOpen(false)}
-                    aria-label="Close tileset picker"
-                  >
-                    ×
-                  </button>
-                </div>
-                <small>Drag a rectangular slice. Tile size: {t}px.</small>
-                <div className="tileset-picker tileset-picker-large">
-                  <img
-                    src={selected.url}
-                    alt={`${selected.name} enlarged tileset`}
-                    onLoad={(e) =>
-                      setModalPickerScale(
-                        e.currentTarget.clientWidth /
-                          e.currentTarget.naturalWidth,
-                      )
-                    }
-                    onPointerDown={beginPicker}
-                    onPointerMove={dragPicker}
-                    onPointerUp={endPicker}
-                    draggable={false}
-                    onDragStart={(e) => e.preventDefault()}
-                  />
-                  <div
-                    className="picker-selection"
-                    style={{
-                      left: `${selectedRegion.x * modalPickerScale}px`,
-                      top: `${selectedRegion.y * modalPickerScale}px`,
-                      width: `${t * modalPickerScale}px`,
-                      height: `${t * modalPickerScale}px`,
-                    }}
-                  />
-                </div>
-                <button
-                  className="primary"
-                  onClick={() => setPickerOpen(false)}
-                >
-                  Done
-                </button>
-              </div>
             </div>
           )}
-          <label>
-            Tile size
-            <input
-              type="number"
-              value={tileSize}
-              min="8"
-              step="8"
-              onChange={(e) => setTileSize(e.target.value)}
-            />
-          </label>
-          <label>
-            Godot asset folder
-            <input value="res://art/" readOnly />
-          </label>
-          <div className="row">
-            <input
-              type="checkbox"
-              checked={collision}
-              onChange={(e) => setCollision(e.target.checked)}
-            />
-            <label>paint collision</label>
-          </div>
-          <div className="row">
-            <input
-              type="checkbox"
-              checked={grid}
-              onChange={(e) => setGrid(e.target.checked)}
-            />
-            <label>grid</label>
-          </div>
-          <div className="row">
-            <input
-              type="checkbox"
-              checked={debug}
-              onChange={(e) => setDebug(e.target.checked)}
-            />
-            <label>debug</label>
-          </div>
+          </details>
         </aside>
       </main>
     </>

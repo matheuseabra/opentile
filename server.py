@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Local bridge for the bundled Pixel Art Fixer and remove.bg."""
+"""Local bridge for the bundled Pixel Art Fixer and rembg."""
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlparse
@@ -7,44 +7,21 @@ import json
 import os
 import subprocess
 import tempfile
-import urllib.error
-import urllib.request
-import uuid
 
 ROOT = Path(__file__).parent
 FIXER = ROOT / "vendor/pixel-art-fixer/rust/target/release/pixelfixer"
-
-
-def remove_bg_api_key():
-    if "REMOVE_BG_API_KEY" in os.environ:
-        return os.environ["REMOVE_BG_API_KEY"]
-    env_file = ROOT / ".env"
-    if not env_file.exists():
-        return ""
-    for line in env_file.read_text().splitlines():
-        key, separator, value = line.partition("=")
-        if separator and key.strip() == "REMOVE_BG_API_KEY":
-            return value.strip().strip('"\'')
-    return ""
+rembg_session = None
 
 
 def remove_background(image_data):
-    api_key = remove_bg_api_key()
-    if not api_key:
-        raise RuntimeError("Set REMOVE_BG_API_KEY in .env and restart ./run.sh.")
-    boundary = f"----pixel-pipeline-{uuid.uuid4().hex}"
-    body = b"\r\n".join([
-        f"--{boundary}".encode(), b'Content-Disposition: form-data; name="size"', b"", b"auto",
-        f"--{boundary}".encode(), b'Content-Disposition: form-data; name="image_file"; filename="input.png"',
-        b"Content-Type: application/octet-stream", b"", image_data, f"--{boundary}--".encode(), b"",
-    ])
-    request = urllib.request.Request(
-        "https://api.remove.bg/v1.0/removebg", data=body,
-        headers={"X-Api-Key": api_key, "Content-Type": f"multipart/form-data; boundary={boundary}"},
-        method="POST",
-    )
-    with urllib.request.urlopen(request, timeout=60) as response:
-        return response.read(), response.headers.get_content_type()
+    global rembg_session
+    try:
+        from rembg import new_session, remove
+    except ImportError as error:
+        raise RuntimeError("rembg is unavailable. Run ./run.sh to install it.") from error
+    if rembg_session is None:
+        rembg_session = new_session()
+    return remove(image_data, session=rembg_session, force_return_bytes=True), "image/png"
 
 
 def uploaded_image(content_type, content_length, stream):
@@ -100,11 +77,8 @@ class App(SimpleHTTPRequestHandler):
             except RuntimeError as error:
                 self.send_error(503, str(error))
                 return
-            except urllib.error.HTTPError as error:
-                self.send_error(error.code, f"remove.bg could not remove this background (HTTP {error.code}).")
-                return
-            except (urllib.error.URLError, TimeoutError):
-                self.send_error(502, "Could not reach remove.bg.")
+            except Exception as error:
+                self.send_error(422, f"Could not remove this background: {error}")
                 return
             self.send_response(200)
             self.send_header("Content-Type", content_type or "image/png")

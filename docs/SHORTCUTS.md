@@ -14,14 +14,11 @@
 - `Command/Ctrl + V`: paste
 - `Command/Ctrl + Z`: undo
 - `Command/Ctrl + Y`: redo
-
-## Tileset picker
-
-- `Option/Alt + arrows`: resize the selected tileset slice
-- `Enter` or `Escape`: close the large picker
+- `Space + mouse drag`: pan the main canvas area
+- `Mouse wheel over the level`: zoom the level grid
+- `Mouse wheel over the tileset`: zoom the tileset grid
 
 ## Debug and levels
 
 - `F3`: toggle debug overlays
-- `G`: load the Gym sample
-- `L`: load Main Level
+- `Option/Alt + L`: hide/show the layers panel

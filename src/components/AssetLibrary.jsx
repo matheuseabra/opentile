@@ -9,11 +9,10 @@ export function AssetLibrary({
   setAssetCategory,
 }) {
   return (
-    <aside>
-      <h2>Props</h2>
-      <div className="eyebrow">Asset brush</div>
-      <small>Choose a tile, then drag on the canvas.</small>
-      <div className="eyebrow">Import</div>
+    <aside className="asset-sidebar">
+      <h2>Assets</h2>
+      <details className="sidebar-section" open>
+      <summary>Import</summary>
       <select
         value={assetCategory}
         onChange={(event) => setAssetCategory(event.target.value)}
@@ -32,7 +31,9 @@ export function AssetLibrary({
         onChange={onFiles}
       />
       <small>Uploaded tiles stay in this browser.</small>
-      <div className="eyebrow">Prop catalog</div>
+      </details>
+      <details className="sidebar-section" open>
+      <summary>Asset catalog</summary>
       {categories.map((category) => {
         const group = assets.filter(
           (asset) => (asset.category || "terrain") === category,
@@ -66,6 +67,7 @@ export function AssetLibrary({
           </div>
         ) : null;
       })}
+      </details>
     </aside>
   );
 }
