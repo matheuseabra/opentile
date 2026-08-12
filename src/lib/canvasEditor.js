@@ -8,6 +8,19 @@ export const copyTiles = (placed, area) => {
   return tiles;
 };
 
+export const tilesInRegion = (region, tileSize) => {
+  const tiles = [];
+  for (let y = 0; y < region.h; y += tileSize)
+    for (let x = 0; x < region.w; x += tileSize)
+      tiles.push({
+        x: x / tileSize,
+        y: y / tileSize,
+        sx: region.x + x,
+        sy: region.y + y,
+      });
+  return tiles;
+};
+
 export const pasteTiles = (placed, clipboard, origin, width, height) => {
   for (const item of clipboard) {
     const x = origin.x + item.x;

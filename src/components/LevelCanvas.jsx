@@ -89,21 +89,30 @@ export function LevelCanvas({
             <ClipboardPaste size={16} />
           </button>
         </div>
-        <canvas
-          ref={canvasRef}
-          width={levelWidth * t}
-          height={levelHeight * t}
+        <div
+          className="canvas-surface"
           style={{
             width: `${levelWidth * t * zoom}px`,
             height: `${levelHeight * t * zoom}px`,
-            touchAction: "none",
+            "--grid-size": `${t * zoom}px`,
           }}
-          onContextMenu={(event) => event.preventDefault()}
-          onPointerDown={onDown}
-          onPointerMove={onMove}
-          onPointerUp={onUp}
-          onPointerCancel={onUp}
-        />
+        >
+          <canvas
+            ref={canvasRef}
+            width={levelWidth * t}
+            height={levelHeight * t}
+            style={{
+              width: "100%",
+              height: "100%",
+              touchAction: "none",
+            }}
+            onContextMenu={(event) => event.preventDefault()}
+            onPointerDown={onDown}
+            onPointerMove={onMove}
+            onPointerUp={onUp}
+            onPointerCancel={onUp}
+          />
+        </div>
       </div>
     </section>
   );

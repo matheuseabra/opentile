@@ -51,9 +51,11 @@ import {
   deleteTiles,
   moveTiles,
   pasteTiles,
+  tilesInRegion,
 } from "./lib/canvasEditor";
 
 const key = (x, y) => `${x},${y}`;
+const HIGHLIGHT_COLOR = "#55c957";
 const CATEGORIES = ["terrain", "ground", "trees", "objects", "animated"];
 const categoryForName = (name) => {
   const n = name.toLowerCase();
@@ -68,6 +70,25 @@ const categoryForName = (name) => {
           : "terrain";
 };
 const OBJECT_TYPES = ["platform", "prop", "pickup", "enemy", "exit"];
+const AUTOTILE_STATES = ["ignored", "required", "empty"];
+const AUTOTILE_OFFSETS = [
+  [-1, -1], [0, -1], [1, -1],
+  [-1, 0], [0, 0], [1, 0],
+  [-1, 1], [0, 1], [1, 1],
+];
+const newAutotileRule = (index) => ({
+  id: `rule-${Date.now()}-${index}`,
+  name: `Rule ${index + 1}`,
+  pattern: AUTOTILE_OFFSETS.map((_, cell) => cell === 4 ? "required" : "ignored"),
+  variant: null,
+});
+const defaultAutotileRule = () => ({
+  center: "required",
+  cardinal: "required-or-empty",
+  corners: "ignored",
+  defaultTile: null,
+  rules: [newAutotileRule(0)],
+});
 const newLevelDoc = (id, name = id) => ({
   metadata: { id, name, width: 48, height: 36, backgroundSet: "default" },
   layers: DEFAULT_LAYERS.map((layer) => ({ ...layer })),
@@ -117,6 +138,7 @@ function App() {
     [menuOpen, setMenuOpen] = useState(false),
     [levelZoom, setLevelZoom] = useState(1),
     [pickerZoom, setPickerZoom] = useState(1),
+    [pickerDragStart, setPickerDragStart] = useState(null),
     [level, setLevel] = useState("main");
   const [sourceFile, setSourceFile] = useState(null),
     [assetCategory, setAssetCategory] = useState("terrain"),
@@ -146,7 +168,8 @@ function App() {
     [grid, setGrid] = useState(true),
     [collision, setCollision] = useState(false),
     [debug, setDebug] = useState(false),
-    [layerPanelOpen, setLayerPanelOpen] = useState(true);
+    [layerPanelOpen, setLayerPanelOpen] = useState(true),
+    [rulesLayerId, setRulesLayerId] = useState(null);
   const [eraser, setEraser] = useState(false),
     [mode, setMode] = useState("brush"),
     [activeLayer, setActiveLayer] = useState("terrain"),
@@ -170,6 +193,11 @@ function App() {
   const levelHeight = Math.max(1, Number(currentDoc.metadata.height) || 18);
   const documentLayers = layersForDocument(currentDoc);
   const activeLayerDoc = documentLayers.find((layer) => layer.id === activeLayer);
+  const rulesLayer = documentLayers.find((layer) => layer.id === rulesLayerId);
+  const rulesDefaultTile = rulesLayer?.rule?.defaultTile;
+  const rulesDefaultAsset = rulesDefaultTile
+    ? assetsRef.current.find((asset) => asset.name === rulesDefaultTile.assetId)
+    : null;
   const exportCollisions = new Set(collisionsRef.current);
   for (const [cellKey, cell] of placedRef.current)
     if (documentLayers.some((layer) => layer.visible && layer.collision && layersFor(cell)[layer.id]))
@@ -192,6 +220,61 @@ function App() {
   };
   const updateLayers = (updater) =>
     updateCurrentDoc((doc) => ({ ...doc, layers: updater(layersForDocument(doc)) }));
+  const updateAutotileRules = (layerId, updater) =>
+    updateLayers((layers) => layers.map((layer) => layer.id === layerId
+      ? { ...layer, rule: updater({ ...defaultAutotileRule(), ...layer.rule, rules: layer.rule?.rules?.length ? layer.rule.rules : [newAutotileRule(0)] }) }
+      : layer));
+  const openAutotileRules = (layer) => {
+    if (layer.type !== "autotile") return;
+    updateAutotileRules(layer.id, (rule) => rule);
+    setRulesLayerId(layer.id);
+  };
+  const setDefaultAutotileTile = (layerId) => {
+    if (!selected) return setStatus("Select a tileset tile first.");
+    updateAutotileRules(layerId, (rule) => ({
+      ...rule,
+      defaultTile: { assetId: selected.name, x: selectedRegion.x, y: selectedRegion.y },
+    }));
+    setStatus("Default autotile tile set.");
+  };
+  const cycleAutotileRuleCell = (layerId, ruleId, cell) => {
+    updateAutotileRules(layerId, (rule) => ({
+      ...rule,
+      rules: rule.rules.map((item) => item.id !== ruleId ? item : {
+        ...item,
+        pattern: item.pattern.map((state, index) => index === cell
+          ? AUTOTILE_STATES[(AUTOTILE_STATES.indexOf(state) + 1) % AUTOTILE_STATES.length]
+          : state),
+      }),
+    }));
+  };
+  const updateAutotileRule = (layerId, ruleId, patch) => {
+    updateAutotileRules(layerId, (rule) => ({
+      ...rule,
+      rules: rule.rules.map((item) => item.id === ruleId ? { ...item, ...patch } : item),
+    }));
+  };
+  const addAutotileRule = (layerId) => {
+    updateAutotileRules(layerId, (rule) => ({
+      ...rule,
+      rules: [...rule.rules, newAutotileRule(rule.rules.length)],
+    }));
+  };
+  const saveAutotileRules = (layer) => {
+    localStorage.setItem(`pixel-pipeline-autotile-${layer.id}`, JSON.stringify(layer.rule));
+    setStatus(`${layer.name} rules saved.`);
+  };
+  const loadAutotileRules = (layer) => {
+    const saved = localStorage.getItem(`pixel-pipeline-autotile-${layer.id}`);
+    if (!saved) return setStatus("No saved autotile rules for this layer.");
+    try {
+      const rule = JSON.parse(saved);
+      updateLayers((layers) => layers.map((item) => item.id === layer.id ? { ...item, rule } : item));
+      setStatus(`${layer.name} rules loaded.`);
+    } catch {
+      setStatus("Saved autotile rules are invalid.");
+    }
+  };
   const selectLayer = (id) => {
     setActiveLayer(id);
     setStatus("Active layer: " + (documentLayers.find((layer) => layer.id === id)?.name || id));
@@ -201,12 +284,12 @@ function App() {
     if (!name) return;
     const base = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "") || "layer";
     const id = documentLayers.some((layer) => layer.id === base) ? base + "-" + Date.now() : base;
-    updateLayers((layers) => [...layers, { id, name, visible: true, locked: false, collision: false, type, rule: type === "autotile" ? { center: "required", cardinal: "required-or-empty", corners: "ignored" } : undefined }]);
+    updateLayers((layers) => [...layers, { id, name, visible: true, locked: false, collision: false, type, rule: type === "autotile" ? defaultAutotileRule() : undefined }]);
     selectLayer(id);
   };
   const duplicateLayer = (layer) => {
     const id = layer.id + "-copy-" + Date.now();
-    updateLayers((layers) => [...layers, { ...layer, id, name: layer.name + " copy" }]);
+    updateLayers((layers) => [...layers, { ...layer, id, name: layer.name + " copy", rule: layer.type === "autotile" ? { ...defaultAutotileRule(), ...layer.rule, rules: layer.rule?.rules?.map((rule) => ({ ...rule, id: `rule-${Date.now()}-${rule.id}` })) || [newAutotileRule(0)] } : undefined }]);
     selectLayer(id);
   };
   const deleteLayer = (layer) => {
@@ -528,7 +611,7 @@ function App() {
     if (selectedObject) {
       const x = selectedObject.x,
         y = selectedObject.y;
-      ctx.strokeStyle = "#19c6be";
+      ctx.strokeStyle = HIGHLIGHT_COLOR;
       ctx.lineWidth = 2;
       ctx.beginPath();
       ctx.moveTo(x + t / 2, y + t / 2);
@@ -546,7 +629,7 @@ function App() {
       ctx.fillRect(x * t, y * t, t, t);
     }
     if (cursorActive) {
-      ctx.strokeStyle = "#19c6be";
+      ctx.strokeStyle = HIGHLIGHT_COLOR;
       ctx.lineWidth = 2;
       ctx.strokeRect(cursor.x * t + 1, cursor.y * t + 1, t - 2, t - 2);
     }
@@ -1023,33 +1106,50 @@ function App() {
     e.preventDefault();
     e.currentTarget.setPointerCapture?.(e.pointerId);
     const p = pickerCell(e);
+    setPickerDragStart(p);
     setSelectedRegion({ x: p.x * t, y: p.y * t, w: t, h: t });
     setStatus(`Selected tile ${p.x + 1},${p.y + 1}.`);
   };
   const dragPicker = (e) => {
-    if (!(e.buttons & 1)) return;
+    if (!pickerDragStart) return;
     e.preventDefault();
-    const p = pickerCell(e);
-    setSelectedRegion({ x: p.x * t, y: p.y * t, w: t, h: t });
+    const p = pickerCell(e),
+      x = Math.min(p.x, pickerDragStart.x),
+      y = Math.min(p.y, pickerDragStart.y),
+      w = Math.abs(p.x - pickerDragStart.x) + 1,
+      h = Math.abs(p.y - pickerDragStart.y) + 1;
+    setSelectedRegion({ x: x * t, y: y * t, w: w * t, h: h * t });
+    setStatus(`Selected ${w}×${h} tile region.`);
   };
   const endPicker = (e) => {
     e.currentTarget.releasePointerCapture?.(e.pointerId);
+    setPickerDragStart(null);
   };
   const stamp = (x, y) => {
-    if (!selected || x < 0 || y < 0 || x >= levelWidth || y >= levelHeight) return;
-    placedRef.current.set(
-      key(x, y),
-      putTile(placedRef.current.get(key(x, y)), activeLayer, {
-        asset: selected,
-        sx: selectedRegion.x,
-        sy: selectedRegion.y,
-        attributes: tileAttributes,
-        autotile: activeLayerDoc?.type === "autotile"
-          ? { x: selectedRegion.x, y: selectedRegion.y }
-          : undefined,
-      }),
-    );
-    resolveAutotileAround(x, y);
+    const defaultTile = activeLayerDoc?.type === "autotile" ? activeLayerDoc.rule?.defaultTile : null;
+    const baseAsset = defaultTile
+      ? assetsRef.current.find((asset) => asset.name === defaultTile.assetId)
+      : selected;
+    if (!baseAsset) return;
+    const region = defaultTile ? { x: defaultTile.x, y: defaultTile.y, w: t, h: t } : selectedRegion;
+    for (const source of tilesInRegion(region, t)) {
+      const dx = x + source.x,
+        dy = y + source.y;
+      if (dx < 0 || dy < 0 || dx >= levelWidth || dy >= levelHeight) continue;
+      placedRef.current.set(
+        key(dx, dy),
+        putTile(placedRef.current.get(key(dx, dy)), activeLayer, {
+          asset: baseAsset,
+          sx: source.sx,
+          sy: source.sy,
+          attributes: tileAttributes,
+          autotile: activeLayerDoc?.type === "autotile"
+            ? { x: region.x, y: region.y }
+            : undefined,
+        }),
+      );
+      resolveAutotileAround(dx, dy);
+    }
   };
   const resolveAutotileAt = (x, y) => {
     const cellKey = key(x, y), tile = layersFor(placedRef.current.get(cellKey))[activeLayer];
@@ -1060,8 +1160,11 @@ function App() {
       return other?.autotile && (other.asset || other) === asset && other.autotile.x === base.x && other.autotile.y === base.y;
     };
     const left = connected(x - 1, y), right = connected(x + 1, y), up = connected(x, y - 1), down = connected(x, y + 1);
-    const column = left && right ? 1 : left ? 2 : right ? 0 : 1;
-    const row = up && down ? 1 : up ? 2 : down ? 0 : 1;
+    const neighbors = AUTOTILE_OFFSETS.map(([dx, dy], index) => index === 4 ? true : connected(x + dx, y + dy));
+    const matches = (rule) => rule.pattern?.every((state, index) => state === "ignored" || (state === "required" ? neighbors[index] : !neighbors[index]));
+    const explicit = activeLayerDoc?.rule?.rules?.find((rule) => rule.variant && matches(rule));
+    const column = explicit ? explicit.variant.x : left && right ? 1 : left ? 2 : right ? 0 : 1;
+    const row = explicit ? explicit.variant.y : up && down ? 1 : up ? 2 : down ? 0 : 1;
     const hasThreeByThree = base.x + t * 3 <= asset.image.width && base.y + t * 3 <= asset.image.height;
     placedRef.current.set(cellKey, putTile(placedRef.current.get(cellKey), activeLayer, {
       ...tile,
@@ -1206,6 +1309,7 @@ function App() {
       }
       if (k === "escape") {
         setMenuOpen(false);
+        setPickerDragStart(null);
         setMode("brush");
         setEraser(false);
         setSelection(null);
@@ -1409,7 +1513,6 @@ function App() {
         >
           <Menu size={16} /> Menu
         </button>
-        <span role="status">{status}</span>
       </header>
       {menuOpen && (
         <div
@@ -1484,6 +1587,54 @@ function App() {
                 <button onClick={() => exportScene("level.tscn")}><Box size={15} /> Godot scene</button>
               </div>
             </section>
+          </div>
+        </div>
+      )}
+      {rulesLayer && (
+        <div className="autotile-rules-modal" role="dialog" aria-modal="true" aria-label={`${rulesLayer.name} rules`}>
+          <div className="autotile-rules-card">
+            <div className="autotile-rules-head">
+              <strong>{rulesLayer.name} Rules</strong>
+              <button aria-label="Close autotile rules" onClick={() => setRulesLayerId(null)}>×</button>
+            </div>
+            <section className="autotile-defaults">
+              <h2>Default Tiles</h2>
+              <p className="autotile-help">This section sets the default tile used as the base for this autotile layer.</p>
+              <button className="autotile-default-preview" aria-label="Set default autotile tile" onClick={() => setDefaultAutotileTile(rulesLayer.id)}>
+                {rulesDefaultAsset ? <span className="autotile-tile-preview" style={{ backgroundImage: `url(${rulesDefaultAsset.url})`, backgroundPosition: `${-rulesDefaultTile.x}px ${-rulesDefaultTile.y}px`, backgroundSize: `${rulesDefaultAsset.image.width}px ${rulesDefaultAsset.image.height}px` }} /> : <span className="autotile-placeholder">Click a selected tile</span>}
+                <span className="autotile-default-copy"><strong>{rulesDefaultAsset ? rulesDefaultTile.assetId : "Empty default tile"}</strong><small>Click a tile in the editor, then click here to set it as the base.</small></span>
+              </button>
+            </section>
+            <p className="autotile-help autotile-rule-example"><strong>Rule example</strong> A rule checks the tile's 3×3 surroundings. Cycle each cell to mark tiles that must exist, must be empty, or are ignored. When the pattern matches, its variant is placed seamlessly.</p>
+            {(rulesLayer.rule?.rules || [newAutotileRule(0)]).map((rule) => (
+              <section className="autotile-rule" key={rule.id}>
+                <div className="autotile-rule-head">
+                  <input aria-label={`${rule.name} name`} value={rule.name} onChange={(event) => updateAutotileRule(rulesLayer.id, rule.id, { name: event.target.value })} />
+                  <button aria-label={`Remove ${rule.name}`} onClick={() => updateAutotileRules(rulesLayer.id, (config) => ({ ...config, rules: config.rules.filter((item) => item.id !== rule.id) }))}>×</button>
+                </div>
+                <div className="autotile-rule-body">
+                  <div className="autotile-pattern-grid" aria-label={`${rule.name} 3 by 3 pattern`}>
+                    {rule.pattern.map((state, cell) => (
+                      <button key={cell} className={`pattern-${state}`} aria-label={`${rule.name} cell ${cell + 1}: ${state}`} onClick={() => cycleAutotileRuleCell(rulesLayer.id, rule.id, cell)}>{cell === 4 ? "•" : ""}</button>
+                    ))}
+                  </div>
+                  <div className="autotile-variant">
+                    <small>Variant tile</small>
+                    <div className="autotile-variant-fields">
+                      <label>X <select value={rule.variant?.x ?? 1} onChange={(event) => updateAutotileRule(rulesLayer.id, rule.id, { variant: { x: Number(event.target.value), y: rule.variant?.y ?? 1 } })}>{[0, 1, 2].map((value) => <option key={value}>{value}</option>)}</select></label>
+                      <label>Y <select value={rule.variant?.y ?? 1} onChange={(event) => updateAutotileRule(rulesLayer.id, rule.id, { variant: { x: rule.variant?.x ?? 1, y: Number(event.target.value) } })}>{[0, 1, 2].map((value) => <option key={value}>{value}</option>)}</select></label>
+                    </div>
+                    {rulesDefaultAsset && <span className="autotile-rule-preview" style={{ backgroundImage: `url(${rulesDefaultAsset.url})`, backgroundPosition: `${-(rulesDefaultTile.x + (rule.variant?.x ?? 1) * t)}px ${-(rulesDefaultTile.y + (rule.variant?.y ?? 1) * t)}px`, backgroundSize: `${rulesDefaultAsset.image.width}px ${rulesDefaultAsset.image.height}px` }} />}
+                  </div>
+                </div>
+              </section>
+            ))}
+            <button className="autotile-add-rule" onClick={() => addAutotileRule(rulesLayer.id)}><Plus size={14} /> Rule</button>
+            <div className="autotile-rules-actions">
+              <button onClick={() => saveAutotileRules(rulesLayer)}><Save size={14} /> Save</button>
+              <button onClick={() => loadAutotileRules(rulesLayer)}><Download size={14} /> Load</button>
+              <button title="Click each cell to cycle ignored, required, and empty states." aria-label="Autotile rules help">?</button>
+            </div>
           </div>
         </div>
       )}
@@ -1592,8 +1743,8 @@ function App() {
               <Trash2 size={16} />
             </button>
           </div>
-          <details className="layer-panel" open={layerPanelOpen} onToggle={(e) => setLayerPanelOpen(e.currentTarget.open)}>
-            <summary>Layers · hide/show (⌥L)</summary>
+          <details className="layer-panel" open={layerPanelOpen}>
+            <summary onClick={(event) => { event.preventDefault(); setLayerPanelOpen((open) => !open); }}>Layers · hide/show (⌥L)</summary>
             {documentLayers.map((layer, index) => (
               <div className={'layer-row ' + (activeLayer === layer.id ? 'active' : '')} key={layer.id}>
                 {(() => {
@@ -1604,7 +1755,7 @@ function App() {
                 <button aria-label={layer.visible ? 'Hide layer' : 'Show layer'} title={layer.visible ? 'Hide layer' : 'Show layer'} onClick={() => updateLayers((layers) => layers.map((item) => item.id === layer.id ? { ...item, visible: !item.visible } : item))}>{layer.visible ? <Eye size={14} /> : <EyeOff size={14} />}</button>
                 <button aria-label={layer.locked ? 'Unlock layer' : 'Lock layer'} title={layer.locked ? 'Unlock layer' : 'Lock layer'} onClick={() => updateLayers((layers) => layers.map((item) => item.id === layer.id ? { ...item, locked: !item.locked } : item))}>{layer.locked ? <Lock size={14} /> : <Unlock size={14} />}</button>
                 <button aria-label="Toggle layer collision" className={layer.collision ? 'collision-badge' : ''} title="Toggle layer collision" onClick={() => updateLayers((layers) => layers.map((item) => item.id === layer.id ? { ...item, collision: !item.collision } : item))}><Shield size={14} /></button>
-                <details className="layer-more"><summary aria-label="More layer options" title="More layer options"><MoreHorizontal size={14} /></summary><button onClick={() => { const name = prompt('Layer name', layer.name); if (name) updateLayers((layers) => layers.map((item) => item.id === layer.id ? { ...item, name } : item)); }}>Rename</button><button onClick={() => duplicateLayer(layer)}>Duplicate</button><button onClick={() => updateLayers((layers) => layers.map((item) => item.id === layer.id ? { ...item, type: item.type === "autotile" ? "tile" : "autotile", rule: item.type === "autotile" ? undefined : { center: "required", cardinal: "required-or-empty", corners: "ignored" } } : item))}>{layer.type === "autotile" ? "Regular tile" : "Autotile"}</button><button onClick={() => moveLayer(index, 1)}>Move up</button><button onClick={() => moveLayer(index, -1)}>Move down</button><button onClick={() => { const entry = prompt("Property as key=value"); if (!entry?.includes("=")) return; const [name, value] = entry.split(/=(.*)/s); updateLayers((layers) => layers.map((item) => item.id === layer.id ? { ...item, properties: { ...item.properties, [name.trim()]: value } } : item)); }}>Property</button><button className="danger" onClick={() => deleteLayer(layer)}>Delete</button></details>
+                <details className="layer-more"><summary aria-label="More layer options" title="More layer options"><MoreHorizontal size={14} /></summary>{layer.type === "autotile" && <button onClick={() => openAutotileRules(layer)}>Rules</button>}<button onClick={() => { const name = prompt('Layer name', layer.name); if (name) updateLayers((layers) => layers.map((item) => item.id === layer.id ? { ...item, name } : item)); }}>Rename</button><button onClick={() => duplicateLayer(layer)}>Duplicate</button><button onClick={() => updateLayers((layers) => layers.map((item) => item.id === layer.id ? { ...item, type: item.type === "autotile" ? "tile" : "autotile", rule: item.type === "autotile" ? undefined : defaultAutotileRule() } : item))}>{layer.type === "autotile" ? "Regular tile" : "Autotile"}</button><button onClick={() => moveLayer(index, 1)}>Move up</button><button onClick={() => moveLayer(index, -1)}>Move down</button><button onClick={() => { const entry = prompt("Property as key=value"); if (!entry?.includes("=")) return; const [name, value] = entry.split(/=(.*)/s); updateLayers((layers) => layers.map((item) => item.id === layer.id ? { ...item, properties: { ...item.properties, [name.trim()]: value } } : item)); }}>Property</button><button className="danger" onClick={() => deleteLayer(layer)}>Delete</button></details>
               </div>
             ))}
             <div className="layer-add"><button onClick={() => addLayer()}>+ Layer</button><button onClick={() => addLayer("autotile")}>+ Autotile layer</button></div>
@@ -1773,7 +1924,7 @@ function App() {
             <strong>{selected?.name || "Nothing selected"}</strong>
           </div>
           <div className="eyebrow">Tileset picker</div>
-          <small>Click or drag to choose one tile. Scroll here to zoom this tileset only.</small>
+          <small>Click for one tile or drag for a rectangular region. Scroll here to zoom this tileset only.</small>
           {selected && (
             <div
               className="tileset-picker"
