@@ -76,7 +76,7 @@ pixel-art fixer remains subject to its own license.
 ## Project map
 
 ```text
-src/main.jsx       React/Vite editor
+src/main.tsx       React/Vite editor
 src/styles.css     pixel-art UI styling
 server.py          loopback image-processing bridge
 assets/            intentional sample/generated art

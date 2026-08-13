@@ -2,7 +2,7 @@
 
 ## Project Structure
 
-- `src/main.jsx` contains the React/Vite editor, canvas interactions, level data, and exports.
+- `src/main.tsx` contains the React/Vite editor, canvas interactions, level data, and exports.
 - `src/styles.css` contains the pixel-art UI, editor layout, toolbars, picker, inspector, and debug styling.
 - `docs/` contains setup, architecture, asset-pipeline, level-schema, shortcut, and export documentation.
 - `vendor/pixel-art-fixer/` contains the bundled pixel-art cleanup implementation.

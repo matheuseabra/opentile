@@ -1,3 +1,4 @@
+import type { CSSProperties } from "react";
 import {
   BoxSelect,
   ClipboardPaste,
@@ -5,6 +6,8 @@ import {
   Eraser,
   MousePointer2,
 } from "lucide-react";
+
+type GridStyle = CSSProperties & { "--grid-size": string };
 
 export function LevelCanvas({
   canvasRef,
@@ -31,7 +34,7 @@ export function LevelCanvas({
   zoom,
 }) {
   return (
-    <section ref={stageRef} id="stage" className={grid ? "grid-on" : "grid-off"} style={{ "--grid-size": `${t * zoom}px` }} onWheel={onCanvasWheel} onPointerDown={onStageDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp}>
+    <section ref={stageRef} id="stage" className={grid ? "grid-on" : "grid-off"} style={{ "--grid-size": `${t * zoom}px` } as GridStyle} onWheel={onCanvasWheel} onPointerDown={onStageDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp}>
       {debug && (
         <div className="debug-panel">
           <strong>DEBUG</strong>
@@ -95,7 +98,7 @@ export function LevelCanvas({
             width: `${levelWidth * t * zoom}px`,
             height: `${levelHeight * t * zoom}px`,
             "--grid-size": `${t * zoom}px`,
-          }}
+          } as GridStyle}
         >
           <canvas
             ref={canvasRef}
