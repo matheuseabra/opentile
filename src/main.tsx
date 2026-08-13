@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useRef, useState, type CSSProperties } from "react";
 import { createRoot } from "react-dom/client";
 import {
   BoxSelect,
@@ -54,7 +54,9 @@ import {
   tilesInRegion,
 } from "./lib/canvasEditor";
 
-const key = (x, y) => `${x},${y}`;
+type GridStyle = CSSProperties & { "--grid-size": string };
+
+const key = (x: number, y: number) => `${x},${y}`;
 const HIGHLIGHT_COLOR = "#55c957";
 const CATEGORIES = ["terrain", "ground", "trees", "objects", "animated"];
 const categoryForName = (name) => {
@@ -116,8 +118,8 @@ function App() {
     stageRef = useRef(null),
     dbRef = useRef(null),
     assetsRef = useRef([]);
-  const placedRef = useRef(new Map()),
-    collisionsRef = useRef(new Set()),
+  const placedRef = useRef<Map<string, any>>(new Map()),
+    collisionsRef = useRef<Set<string>>(new Set()),
     historyRef = useRef([]),
     redoRef = useRef([]),
     levelsRef = useRef({ main: null });
@@ -127,7 +129,7 @@ function App() {
     spaceRef = useRef(false),
     lastPaintRef = useRef(""),
     buttonRef = useRef(0);
-  const [assets, setAssets] = useState([]),
+  const [assets, setAssets] = useState<any[]>([]),
     [selected, setSelected] = useState(null),
     [selectedRegion, setSelectedRegion] = useState({
       x: 0,
@@ -145,7 +147,7 @@ function App() {
     [status, setStatus] = useState(
       "Upload a tile to add it to your local library.",
     );
-  const [levelDocs, setLevelDocs] = useState(() => {
+  const [levelDocs, setLevelDocs] = useState<any>(() => {
     try {
       const saved = JSON.parse(
         localStorage.getItem("pixel-pipeline-levels") || "null",
@@ -164,7 +166,7 @@ function App() {
   const [objectSelection, setObjectSelection] = useState(null),
     [objectMode, setObjectMode] = useState(false),
     [objectDrag, setObjectDrag] = useState(null);
-  const [tileSize, setTileSize] = useState(16),
+  const [tileSize, setTileSize] = useState<number | string>(16),
     [grid, setGrid] = useState(true),
     [collision, setCollision] = useState(false),
     [debug, setDebug] = useState(false),
@@ -179,10 +181,10 @@ function App() {
     [lastTile, setLastTile] = useState({ x: 0, y: 0 }),
     [cursorActive, setCursorActive] = useState(false),
     [version, redraw] = useState(0);
-  const [tileAttributes, setTileAttributes] = useState({}),
+  const [tileAttributes, setTileAttributes] = useState<Record<string, any>>({}),
     [customAttributeKey, setCustomAttributeKey] = useState(""),
     [customAttributeValue, setCustomAttributeValue] = useState("");
-  const clipboardRef = useRef([]),
+  const clipboardRef = useRef<any[]>([]),
     clipboardSizeRef = useRef({ w: 1, h: 1 });
   const t = Math.max(8, Number(tileSize) || 32);
   useEffect(() => {
@@ -198,7 +200,7 @@ function App() {
   const rulesDefaultAsset = rulesDefaultTile
     ? assetsRef.current.find((asset) => asset.name === rulesDefaultTile.assetId)
     : null;
-  const exportCollisions = new Set(collisionsRef.current);
+  const exportCollisions = new Set<string>(collisionsRef.current);
   for (const [cellKey, cell] of placedRef.current)
     if (documentLayers.some((layer) => layer.visible && layer.collision && layersFor(cell)[layer.id]))
       exportCollisions.add(cellKey);
@@ -209,7 +211,7 @@ function App() {
   const updateCurrentDoc = (updater) =>
     persistLevels({ ...levelDocs, [level]: updater(currentDoc) });
   const persistSketch = () => {
-    const sketch = serializeSketch(placedRef.current, collisionsRef.current);
+    const sketch = serializeSketch(placedRef.current, collisionsRef.current, documentLayers);
     const docs = { ...levelDocs, [level]: { ...currentDoc, ...sketch } };
     setLevelDocs(docs);
     localStorage.setItem("pixel-pipeline-levels", JSON.stringify(docs));
@@ -415,7 +417,7 @@ function App() {
     select(s.selected);
     persistLevels({
       ...levelDocs,
-      [level]: { ...s.document, ...serializeSketch(s.placed, s.collisions) },
+      [level]: { ...s.document, ...serializeSketch(s.placed, s.collisions, documentLayers) },
     });
     redraw((v) => v + 1);
   };
@@ -502,7 +504,7 @@ function App() {
   };
 
   useEffect(() => {
-    for (const [id, doc] of Object.entries(levelDocs)) {
+    for (const [id, doc] of Object.entries(levelDocs) as [string, any][]) {
       if (levelsRef.current[id] || !(doc.tiles?.length || doc.collisions?.length))
         continue;
       const names = new Set((doc.tiles || []).map((tile) => tile.asset));
@@ -513,7 +515,7 @@ function App() {
         levelsRef.current[id] = target;
         if (id === level) {
           placedRef.current = new Map(target.placed);
-          collisionsRef.current = new Set(target.collisions);
+          collisionsRef.current = new Set<string>(target.collisions);
           redraw((v) => v + 1);
         }
       }
@@ -624,7 +626,7 @@ function App() {
       ctx.fillText("Y", x + t / 2 + 4, y - t - 4);
     }
     ctx.fillStyle = "rgba(231,106,77,.4)";
-    for (const k of collisionsRef.current) {
+    for (const k of collisionsRef.current as Set<string>) {
       const [x, y] = k.split(",").map(Number);
       ctx.fillRect(x * t, y * t, t, t);
     }
@@ -1391,7 +1393,7 @@ function App() {
     commit();
     for (const [k, cell] of placedRef.current) {
       const layers = Object.fromEntries(
-        Object.entries(layersFor(cell)).filter(
+        (Object.entries(layersFor(cell)) as [string, any][]).filter(
           ([, tile]) => (tile.asset || tile) !== asset,
         ),
       );
@@ -1488,7 +1490,7 @@ function App() {
           if (value !== undefined) lines.push(`metadata/${attribute} = ${JSON.stringify(value)}`);
       }
     }
-    for (const k of exportCollisions) {
+    for (const k of exportCollisions as Set<string>) {
       const [x, y] = k.split(",").map(Number);
       lines.push(
         `\n[node name="Collision_${x}_${y}" type="StaticBody2D" parent="."]`,
@@ -1548,7 +1550,7 @@ function App() {
                 <button onClick={() => {
                   const id = prompt("Save level as", currentDoc.metadata.id + "-copy");
                   if (!id || levelDocs[id]) return;
-                  const sketch = serializeSketch(placedRef.current, collisionsRef.current);
+                  const sketch = serializeSketch(placedRef.current, collisionsRef.current, documentLayers);
                   persistLevels({ ...levelDocs, [id]: { ...currentDoc, ...sketch, metadata: { ...currentDoc.metadata, id, name: id } } });
                   levelsRef.current[id] = { placed: new Map(placedRef.current), collisions: new Set(collisionsRef.current) };
                   setLevel(id);
@@ -1928,7 +1930,7 @@ function App() {
           {selected && (
             <div
               className="tileset-picker"
-              style={{ "--grid-size": `${t * pickerZoom}px` }}
+              style={{ "--grid-size": `${t * pickerZoom}px` } as GridStyle}
               onWheel={onPickerWheel}
             >
               <div

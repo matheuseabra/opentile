@@ -10,7 +10,7 @@ export const layersFor = (cell) => {
   return cell.asset || cell.image ? { terrain: cell } : cell;
 };
 
-export const tilesFor = (cell, layers = DEFAULT_LAYERS) =>
+export const tilesFor = (cell: any, layers: any[] = DEFAULT_LAYERS) =>
   layers.map(({ id }) => layersFor(cell)[id]).filter(Boolean);
 
 export const putTile = (cell, layer, tile) => ({

@@ -1,9 +1,9 @@
-import { DEFAULT_LAYERS, layersFor, layersForDocument, putTile } from "./tileLayers.js";
+import { DEFAULT_LAYERS, layersFor, layersForDocument, putTile } from "./tileLayers";
 
-export const serializeSketch = (placed, collisions, layers) => ({
+export const serializeSketch = (placed: Map<string, any>, collisions: Set<string>, layers?: any[]) => ({
   tiles: [...placed].flatMap(([cellKey, cell]) => {
     const [x, y] = cellKey.split(",").map(Number);
-    return Object.entries(layersFor(cell)).filter(([layer]) => !layers || layers.some((item) => item.id === layer && item.visible)).map(([layer, tile]) => ({
+    return (Object.entries(layersFor(cell)) as [string, any][]).filter(([layer]) => !layers || layers.some((item) => item.id === layer && item.visible)).map(([layer, tile]) => ({
       x,
       y,
       layer,
@@ -18,7 +18,7 @@ export const serializeSketch = (placed, collisions, layers) => ({
   collisions: [...collisions],
 });
 
-export const normalizeLevel = (doc) => {
+export const normalizeLevel = (doc: any) => {
   const layers = layersForDocument(doc);
   const legacyDefaults = layers.map(({ id }) => id).join(",") === "terrain,decoration,foreground";
   const hasExtraPaint = (doc.tiles || []).some((tile) => tile.layer !== "terrain");
@@ -29,7 +29,7 @@ export const normalizeLevel = (doc) => {
   };
 };
 
-export const clearLevelContent = (doc) => ({
+export const clearLevelContent = (doc: any) => ({
   ...doc,
   platforms: [],
   props: [],
@@ -40,9 +40,9 @@ export const clearLevelContent = (doc) => ({
   collisions: [],
 });
 
-export const hydrateSketch = (doc, assets) => {
+export const hydrateSketch = (doc: any, assets: any[]) => {
   const byName = new Map(assets.map((asset) => [asset.name, asset]));
-  const placed = new Map();
+  const placed = new Map<string, any>();
   for (const tile of doc.tiles || []) {
     const asset = byName.get(tile.asset);
     if (!asset) continue;
@@ -58,5 +58,5 @@ export const hydrateSketch = (doc, assets) => {
       }),
     );
   }
-  return { placed, collisions: new Set(doc.collisions || []) };
+  return { placed, collisions: new Set<string>(doc.collisions || []) };
 };

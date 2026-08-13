@@ -1,4 +1,4 @@
-import { DEFAULT_LAYERS, layersFor, tilesFor } from "./tileLayers.js";
+import { DEFAULT_LAYERS, layersFor, tilesFor } from "./tileLayers";
 
 export const createPhaserTilemap = ({
   placed,
