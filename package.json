@@ -1,17 +1,31 @@
 {
   "name": "opentile",
-  "private": true,
+  "private": false,
   "version": "0.1.0",
   "type": "module",
+  "description": "Local-first pixel-art level editor with game-ready exports.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/matheuseabra/opentile.git"
+  },
+  "bugs": {
+    "url": "https://github.com/matheuseabra/opentile/issues"
+  },
+  "homepage": "https://github.com/matheuseabra/opentile#readme",
+  "engines": {
+    "node": "^20.19.0 || >=22.12.0"
+  },
   "scripts": {
     "dev": "vite",
-    "build": "vite build"
+    "build": "vite build",
+    "test": "./test.sh"
   },
   "dependencies": {
-    "@vitejs/plugin-react": "latest",
-    "lucide-react": "^1.25.0",
-    "react": "latest",
-    "react-dom": "latest",
-    "vite": "latest"
+    "@vitejs/plugin-react": "6.0.5",
+    "lucide-react": "1.25.0",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "vite": "8.2.1"
   }
 }

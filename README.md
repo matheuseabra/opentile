@@ -1,10 +1,10 @@
 # ▓▓ OpenTile
 
-> **AI sprites → pixel cleanup → level sketch → Godot export**
+> **Pixel-art cleanup → tile painting → level sketch → game-ready exports**
 
-Local-first tooling for turning generated 2D game art into usable pixel-art
-assets and quick playable level drafts. No hosted backend is required for the
-editor.
+OpenTile is a local-first pixel-art level editor for quickly sketching 2D
+levels. It keeps assets in IndexedDB and level documents in browser storage;
+the optional image-processing bridge runs only on your machine.
 
 ```text
 ┌──────────────┐   ┌──────────────┐   ┌──────────────┐
@@ -13,23 +13,41 @@ editor.
 └──────────────┘   └──────────────┘   └──────────────┘
 ```
 
-![OpenTile editor](docs/editor-screenshot.jpg)
+![OpenTile editor](docs/editor-screenshot.png)
 
-## Start
+## Run locally
+
+### Requirements
+
+- Node.js `^20.19.0 || >=22.12.0`
+- Python 3.11–3.13 (for local background removal)
+- Rust/Cargo (for the bundled pixel-art fixer)
+- Git
+
+Clone with the fixer submodule, install JavaScript dependencies, and start the
+editor:
 
 ```sh
-./run.sh             # Vite editor + local image-processing bridge
-./test.sh            # smoke checks
-npm run build        # production bundle
+git clone --recurse-submodules https://github.com/matheuseabra/opentile.git
+cd opentile
+npm ci
+./run.sh
 ```
 
-Open <http://localhost:5173>.
+Open <http://localhost:5173>. If you cloned without submodules, run
+`git submodule update --init --recursive` before starting.
+
+### Verify
+
+```sh
+npm run build
+npm test
+```
 
 ## Pixel-art workflow
 
-1. Generate a single PNG sprite or uniform sprite sheet with `$imagegen`.
-   Request hard edges, a fixed frame size, no text or gradients, and a limited
-   palette.
+1. Prepare a single PNG sprite or uniform sprite sheet. Hard edges, a fixed
+   frame size, no text or gradients, and a limited palette work best.
 2. Upload it to the editor. Uploads are processed locally by rembg and fall
    back to the original file if removal fails.
 3. Choose **Fix pixel grid** when the result needs the bundled
@@ -47,6 +65,13 @@ configured Godot `TileSet`, keeping the sketching loop fast.
 Levels use a structured document with `metadata`, `platforms`, `props`,
 `pickups`, `enemies`, and `exits`. See the complete schema and examples in
 [`docs/README.md`](docs/README.md) and [`docs/LEVEL_EDITOR.md`](docs/LEVEL_EDITOR.md).
+
+## Contributing and security
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for local-development and pull-request
+guidance. Report vulnerabilities privately using [SECURITY.md](SECURITY.md).
+OpenTile is released under the [MIT License](LICENSE); the bundled
+pixel-art fixer remains subject to its own license.
 
 ## Project map
 

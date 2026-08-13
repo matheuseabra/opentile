@@ -3,8 +3,13 @@
 ## Level editing
 
 - `B`: brush mode
-- `M`: rectangular selection mode
+- `M`: selection mode (drag a tile rectangle)
+- `R`: rectangle paint mode
+- `I`: line paint mode
+- `F`: fill mode
 - `E`: eraser mode
+- `Escape`: return to brush mode and clear the active selection
+- `Delete` / `Backspace`: delete the active tile selection
 - `Option/Alt + click`: tile dropper
 - `Control` held: show the keyboard tile cursor
 - `Command/Ctrl + arrows`: move the active level selection or keyboard cursor

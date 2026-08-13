@@ -16,8 +16,14 @@ image generation → pixel-grid fixing → background removal → categorization
 ## Processing tools
 
 - **Fix pixel grid** sends the selected source file to the local pixel-art fixer.
-- Asset uploads automatically send each source image to remove.bg through the local Python bridge, then import the transparent PNG result. If remove.bg is unavailable or rejects an asset, the original file is imported instead. Set `REMOVE_BG_API_KEY` in `.env`; the browser never receives the key.
-- **Remove background** repeats that processing for the most recently uploaded source image.
+- Asset uploads are sent to the local Python bridge, which uses `rembg` to
+  remove the background and imports the transparent PNG result. If processing
+  fails, the original file is imported instead. `./run.sh` creates a virtual
+  environment and installs the direct dependency version recorded in
+  `requirements.txt`; no
+  API key is required.
+- **Remove background** repeats that local processing for the most recently
+  uploaded source image.
 - The catalog stores the processed file and its category in IndexedDB.
 - Existing files without category metadata receive a filename-based fallback category.
 

@@ -1,21 +1,11 @@
 # Getting started
 
-## Run locally
+Follow the [README setup instructions](../README.md#run-locally) to clone the
+repository with its submodule, install dependencies, and start the editor.
 
-From the project root:
-
-```sh
-./run.sh
-```
-
-Open `http://localhost:5173`. The Vite app is the editor; the local `/api` proxy exposes pixel cleanup and rembg background removal.
-
-Run checks with:
-
-```sh
-npm run build
-./test.sh
-```
+Open `http://localhost:5173`. The Vite app is the editor; its local `/api`
+proxy exposes pixel cleanup and rembg background removal. The bridge listens
+only on loopback and is not included in the production Vite bundle.
 
 ## First workflow
 
@@ -26,4 +16,7 @@ npm run build
 5. Use the inspector for exact object positions and settings.
 6. Save the level locally or export JSON/Godot/PNG output.
 
-Uploaded assets and level documents are stored in this browser. Clearing site storage removes them.
+Uploaded assets and level documents are stored in this browser. Clearing site
+storage, using a different browser profile, or opening the editor on another
+machine does not carry them over. Export JSON and downloaded assets to keep a
+portable copy of work you want to retain.

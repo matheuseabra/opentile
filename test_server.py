@@ -1,23 +1,27 @@
-from io import BytesIO
 import sys
-from types import SimpleNamespace
 import unittest
+from http.client import HTTPConnection
+from io import BytesIO
+from threading import Thread
+from types import SimpleNamespace
 from unittest import mock
 
-from server import uploaded_image
+from server import App, ThreadingHTTPServer, uploaded_image
 
 
 class UploadParsingTests(unittest.TestCase):
     def upload(self, image, boundary="pixel-boundary"):
-        body = b"\r\n".join((
-            f"--{boundary}".encode(),
-            b'Content-Disposition: form-data; name="image"; filename="sprite.png"',
-            b"Content-Type: image/png",
-            b"",
-            image,
-            f"--{boundary}--".encode(),
-            b"",
-        ))
+        body = b"\r\n".join(
+            (
+                f"--{boundary}".encode(),
+                b'Content-Disposition: form-data; name="image"; filename="sprite.png"',
+                b"Content-Type: image/png",
+                b"",
+                image,
+                f"--{boundary}--".encode(),
+                b"",
+            )
+        )
         return uploaded_image(
             f'multipart/form-data; charset=utf-8; boundary="{boundary}"',
             str(len(body)),
@@ -39,6 +43,24 @@ class UploadParsingTests(unittest.TestCase):
                 "9",
                 BytesIO(b"--x--\r\n"),
             )
+
+
+class LocalBridgeTests(unittest.TestCase):
+    def test_does_not_serve_repository_files(self):
+        httpd = ThreadingHTTPServer(("127.0.0.1", 0), App)
+        thread = Thread(target=httpd.serve_forever, daemon=True)
+        thread.start()
+        try:
+            connection = HTTPConnection("127.0.0.1", httpd.server_port)
+            connection.request("GET", "/.env")
+            response = connection.getresponse()
+            self.assertEqual(response.status, 404)
+            response.read()
+            connection.close()
+        finally:
+            httpd.shutdown()
+            httpd.server_close()
+            thread.join()
 
 
 class BackgroundRemovalTests(unittest.TestCase):

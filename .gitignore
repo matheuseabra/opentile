@@ -8,3 +8,6 @@ dist/
 .env
 .DS_Store
 node_modules_hidden_message
+
+# Local pi-subagent artifacts
+.pi-subagents/

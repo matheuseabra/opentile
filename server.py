@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Local bridge for the bundled Pixel Art Fixer and rembg."""
-from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
+
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import urlparse
+import importlib
 import json
 import os
 import subprocess
@@ -16,12 +17,16 @@ rembg_session = None
 def remove_background(image_data):
     global rembg_session
     try:
-        from rembg import new_session, remove
+        rembg = importlib.import_module("rembg")
     except ImportError as error:
-        raise RuntimeError("rembg is unavailable. Run ./run.sh to install it.") from error
+        raise RuntimeError(
+            "rembg is unavailable. Run ./run.sh to install it."
+        ) from error
     if rembg_session is None:
-        rembg_session = new_session()
-    return remove(image_data, session=rembg_session, force_return_bytes=True), "image/png"
+        rembg_session = rembg.new_session()
+    return rembg.remove(
+        image_data, session=rembg_session, force_return_bytes=True
+    ), "image/png"
 
 
 def uploaded_image(content_type, content_length, stream):
@@ -51,12 +56,9 @@ def uploaded_image(content_type, content_length, stream):
     raise ValueError("Expected an image field")
 
 
-class App(SimpleHTTPRequestHandler):
-    def translate_path(self, path):
-        path = urlparse(path).path
-        if path == "/":
-            path = "/app/index.html"
-        return str(ROOT / path.lstrip("/"))
+class App(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_error(404)
 
     def do_POST(self):
         if self.path not in ("/api/fix", "/api/remove-background", "/api/assets"):
@@ -94,12 +96,21 @@ class App(SimpleHTTPRequestHandler):
             source.write_bytes(image_data)
             result = subprocess.run(
                 [str(FIXER), "process", str(source), str(output)],
-                text=True, capture_output=True, timeout=30,
+                text=True,
+                capture_output=True,
+                timeout=30,
             )
             if result.returncode or not output.exists():
-                self.send_error(422, result.stderr[-500:] or "Pixel fixer could not process this image")
+                self.send_error(
+                    422,
+                    result.stderr[-500:] or "Pixel fixer could not process this image",
+                )
                 return
-            meta = json.loads(result.stdout.strip().splitlines()[-1])
+            try:
+                meta = json.loads(result.stdout.strip().splitlines()[-1])
+            except (IndexError, json.JSONDecodeError):
+                self.send_error(422, "Pixel fixer returned invalid metadata")
+                return
             data = output.read_bytes()
         self.send_response(200)
         self.send_header("Content-Type", "image/png")
@@ -111,13 +122,18 @@ class App(SimpleHTTPRequestHandler):
 
 if __name__ == "__main__":
     requested_port = os.environ.get("PORT")
-    port = int(requested_port or "8000")
+    try:
+        port = int(requested_port or "8000")
+    except ValueError:
+        raise SystemExit("PORT must be an integer") from None
     while True:
         try:
             httpd = ThreadingHTTPServer(("127.0.0.1", port), App)
             break
         except OSError:
-            if requested_port or port >= 8010:
+            if requested_port:
+                raise
+            if port >= 8010:
                 raise
             port += 1
     port_file = os.environ.get("PORT_FILE")
