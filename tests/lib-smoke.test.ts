@@ -1,3 +1,4 @@
+import { describe, it } from "vitest";
 import { importAssetFiles } from "../src/lib/assetImport";
 import {
 	categoryForName,
@@ -531,8 +532,12 @@ const run = async () => {
 		hydrationMocks.revoked[0] !== "blob:2" ||
 		hydrationMocks.revoked[1] !== hydratedAssets.assets[0].url
 	) {
-		process.exit(1);
+		throw new Error("Library smoke checks failed");
 	}
 };
 
-await run();
+describe("library modules", () => {
+	it("preserves editor, asset, and export invariants", async () => {
+		await run();
+	});
+});
