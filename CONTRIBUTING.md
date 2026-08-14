@@ -4,18 +4,16 @@ Thanks for helping improve OpenTile.
 
 ## Local development
 
-1. Clone the repository with its submodule: `git clone --recurse-submodules <repo-url>`.
+1. Clone the repository: `git clone <repo-url>`.
 2. Install Node dependencies with `npm ci`.
-3. Install the prerequisites listed in the [README](README.md#run-locally), then run `./run.sh`.
-
-`./run.sh` provisions the local Python environment, applies the tracked portability patch to the bundled pixel-art fixer, builds it when needed, and starts the editor at `http://localhost:5173`.
+3. Run `./run.sh` to start the editor at `http://localhost:5173`.
 
 ## Before opening a pull request
 
 - Keep each change focused and update affected documentation.
 - Run `npm run build` and `npm test`.
 - For editor interactions, verify the flow manually in the browser and include a screenshot or recording when the UI changes.
-- Do not commit generated exports, local browser data, credentials, or changes inside the `vendor/pixel-art-fixer` submodule. Update the tracked patch only when a portability fix is necessary.
+- Do not commit generated exports, local browser data, or credentials.
 
 ## Reporting bugs and requesting features
 

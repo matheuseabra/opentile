@@ -152,8 +152,7 @@ function App() {
 		[pickerZoom, setPickerZoom] = useState(1),
 		[pickerDragStart, setPickerDragStart] = useState(null),
 		[level, setLevel] = useState("main");
-	const [sourceFile, setSourceFile] = useState(null),
-		[assetCategory, setAssetCategory] = useState("terrain"),
+	const [assetCategory, setAssetCategory] = useState("terrain"),
 		[status, setStatus] = useState(
 			"Upload a tile to add it to your local library.",
 		);
@@ -1264,49 +1263,37 @@ function App() {
 				setSelectionStart(null),
 				e.currentTarget.releasePointerCapture?.(e.pointerId));
 	};
-	const importAsset = async (file) => {
-		const form = new FormData();
-		form.append("image", file);
-		try {
-			const response = await fetch("/api/assets", {
-				method: "POST",
-				body: form,
-			});
-			if (!response.ok) throw new Error();
-			const blob = await response.blob();
-			const name = file.name.replace(/\.[^.]+$/, "") + ".png";
-			const asset = await addAsset(blob, name, true, assetCategory, false);
-			return {
-				asset,
-				file: new File([blob], name, { type: "image/png" }),
-				failed: false,
-				removed: true,
-			};
-		} catch {
-			try {
-				const asset = await addAsset(file, file.name, true, assetCategory, false);
-				return { asset, file, failed: false, removed: false };
-			} catch {
-				return { asset: null, file, failed: true, removed: false };
-			}
-		}
-	};
 	const onFiles = async (e) => {
 		const files = [...e.target.files];
 		e.target.value = "";
 		if (!files.length) return;
 		setStatus(
-			`Removing backgrounds from ${files.length} asset${files.length === 1 ? "" : "s"}…`,
+			`Importing ${files.length} asset${files.length === 1 ? "" : "s"}…`,
 		);
-		const imported = await Promise.all(files.map(importAsset));
+		const imported = await Promise.all(
+			files.map(async (file) => {
+				try {
+					return {
+						asset: await addAsset(
+							file,
+							file.name,
+							true,
+							assetCategory,
+							false,
+						),
+						failed: false,
+					};
+				} catch {
+					return { asset: null, failed: true };
+				}
+			}),
+		);
 		const successful = imported.filter((item) => !item.failed);
 		const lastImported = successful.at(-1);
 		if (lastImported?.asset) select(lastImported.asset);
-		if (lastImported?.file) setSourceFile(lastImported.file);
-		const removed = successful.filter((item) => item.removed).length;
 		const failed = imported.length - successful.length;
 		setStatus(
-			`Imported ${successful.length} asset${successful.length === 1 ? "" : "s"}; removed ${removed} background${removed === 1 ? "" : "s"}${failed ? `; skipped ${failed} file${failed === 1 ? "" : "s"}` : ""}.`,
+			`Imported ${successful.length} asset${successful.length === 1 ? "" : "s"}${failed ? `; skipped ${failed} file${failed === 1 ? "" : "s"}` : ""}.`,
 		);
 	};
 	const pickerCell = (e) => {
@@ -1467,54 +1454,6 @@ function App() {
 			resolveAutotileAt(x, y);
 		}
 	};
-	const fix = async () => {
-		if (!sourceFile) return setStatus("Choose an image first.");
-		if (!["localhost", "127.0.0.1"].includes(window.location.hostname))
-			return setStatus(
-				"Pixel fixer is local-only. Run ./run.sh for this tool.",
-			);
-		setStatus("Fixing grid locally…");
-		const fd = new FormData();
-		fd.append("image", sourceFile);
-		try {
-			const response = await fetch("/api/fix", { method: "POST", body: fd });
-			if (!response.ok) return setStatus(await response.text());
-			const blob = await response.blob();
-			setSourceFile(new File([blob], "fixed.png", { type: "image/png" }));
-			await addAsset(blob, "fixed.png");
-			setStatus("Fixed asset imported.");
-		} catch {
-			setStatus(
-				"Could not reach the local pixel fixer. Run ./run.sh and retry.",
-			);
-		}
-	};
-	const eraseBackground = async () => {
-		if (!sourceFile) return setStatus("Choose an image first.");
-		if (!["localhost", "127.0.0.1"].includes(window.location.hostname))
-			return setStatus(
-				"Background removal is available only through ./run.sh.",
-			);
-		setStatus("Removing background…");
-		try {
-			const fd = new FormData();
-			fd.append("image", sourceFile);
-			const response = await fetch("/api/remove-background", {
-				method: "POST",
-				body: fd,
-			});
-			if (!response.ok) return setStatus(await response.text());
-			const blob = await response.blob();
-			setSourceFile(
-				new File([blob], "background-removed.png", { type: "image/png" }),
-			);
-			await addAsset(blob, "background-removed.png");
-			setStatus("Background removed and asset imported.");
-		} catch {
-			setStatus("Could not remove the background.");
-		}
-	};
-
 	useEffect(() => {
 		const keydown = (e) => {
 			const editable = /INPUT|TEXTAREA|SELECT/.test(e.target.tagName);

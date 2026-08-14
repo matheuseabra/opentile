@@ -1,11 +1,13 @@
 # Getting started
 
-Follow the [README setup instructions](../README.md#run-locally) to clone the
-repository with its submodule, install dependencies, and start the editor.
+Install the JavaScript dependencies and start the Vite editor:
 
-Open `http://localhost:5173`. The Vite app is the editor; its local `/api`
-proxy exposes pixel cleanup and rembg background removal. The bridge listens
-only on loopback and is not included in the production Vite bundle.
+```sh
+npm ci
+./run.sh
+```
+
+Open `http://localhost:5173`.
 
 ## First workflow
 

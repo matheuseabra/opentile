@@ -6,30 +6,26 @@
 
 OpenTile is a local-first pixel-art level editor for quickly sketching 2D
 levels. It keeps assets in IndexedDB and level documents in browser storage;
-the optional image-processing bridge runs only on your machine.
+images are imported directly in the browser.
 
 ## Run locally
 
 ### Requirements
 
 - Node.js `^20.19.0 || >=22.12.0`
-- Python 3.11–3.13 (for local background removal)
-- Rust/Cargo (for the bundled pixel-art fixer)
 
 ### Install
 
-Clone with the fixer submodule, install JavaScript dependencies, and start the
-editor:
+Clone the repository, install JavaScript dependencies, and start the editor:
 
 ```sh
-git clone --recurse-submodules https://github.com/matheuseabra/opentile.git
+git clone https://github.com/matheuseabra/opentile.git
 cd opentile
 npm ci
 ./run.sh
 ```
 
-Open <http://localhost:5173>. If you cloned without submodules, run
-`git submodule update --init --recursive` before starting.
+Open <http://localhost:5173>.
 
 ### Verify
 
@@ -42,13 +38,11 @@ npm test
 
 1. Prepare a single PNG sprite or uniform sprite sheet. Hard edges, a fixed
    frame size, no text or gradients, and a limited palette work best.
-2. Upload it to the editor. Uploads are processed locally by rembg and fall
-   back to the original file if removal fails.
-3. Choose **Fix pixel grid** when the result needs the bundled
-   [Retro Diffusion Pixel Art Fixer](https://github.com/Retro-Diffusion/pixel-art-fixer)
-   locally.
-4. Paint tiles, mark collision cells, place objects, and export a PNG preview,
-   structured JSON, or `level.tscn`.
+2. Upload it to the editor. The original image is stored in the browser's local
+   asset library.
+3. Choose a tileset region, then paint tiles, mark collision cells, and place
+   objects.
+4. Export a PNG preview, structured JSON, or `level.tscn`.
 
 Copy exported PNGs into the matching `res://art/` folder before opening the
 Godot scene. The editor intentionally exports `Sprite2D`s instead of a
@@ -64,5 +58,4 @@ Levels use a structured document with `metadata`, `platforms`, `props`,
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for local-development and pull-request
 guidance. Report vulnerabilities privately using [SECURITY.md](SECURITY.md).
-OpenTile is released under the [MIT License](LICENSE); the bundled
-pixel-art fixer remains subject to its own license.
+OpenTile is released under the [MIT License](LICENSE).
