@@ -293,6 +293,7 @@ const makeImageAdapters = (behaviors: string[]) => {
 
 const run = async () => {
 	const importCalls: any[] = [];
+	const selectedImports: any[] = [];
 	const importedAssets = await importAssetFiles(
 		[{ name: "tree.png" }, { name: "broken.png" }, { name: "rock.png" }],
 		"trees",
@@ -301,6 +302,15 @@ const run = async () => {
 			if (name === "broken.png") throw new Error("import failed");
 			return { name };
 		},
+		(asset) => selectedImports.push(asset),
+	);
+	const failedImport = await importAssetFiles(
+		[{ name: "broken.png" }],
+		"terrain",
+		async () => {
+			throw new Error("import failed");
+		},
+		(asset) => selectedImports.push(asset),
 	);
 	const emptyImport = await importAssetFiles([], "terrain", async () => null);
 	const successMocks = makeImageAdapters(["load"]);
@@ -494,6 +504,10 @@ const run = async () => {
 		importedAssets.assets[0].name !== "tree.png" ||
 		importedAssets.assets[1].name !== "rock.png" ||
 		importedAssets.failed !== 1 ||
+		selectedImports.length !== 1 ||
+		selectedImports[0].name !== "rock.png" ||
+		failedImport.assets.length !== 0 ||
+		failedImport.failed !== 1 ||
 		importCalls.length !== 3 ||
 		importCalls[0].file.name !== "tree.png" ||
 		importCalls[0].name !== "tree.png" ||

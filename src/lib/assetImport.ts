@@ -8,6 +8,7 @@ export const importAssetFiles = async (
 		category: string,
 		selectOnAdd: boolean,
 	) => Promise<any>,
+	onImported?: (asset: any) => void,
 ) => {
 	const imported = await Promise.all(
 		files.map(async (file) => {
@@ -21,8 +22,10 @@ export const importAssetFiles = async (
 			}
 		}),
 	);
+	const assets = imported.flatMap((item) => (item.asset ? [item.asset] : []));
+	if (assets.at(-1)) onImported?.(assets.at(-1));
 	return {
-		assets: imported.flatMap((item) => (item.asset ? [item.asset] : [])),
+		assets,
 		failed: imported.filter((item) => item.failed).length,
 	};
 };

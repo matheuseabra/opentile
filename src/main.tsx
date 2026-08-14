@@ -1271,9 +1271,12 @@ function App() {
 		setStatus(
 			`Importing ${files.length} asset${files.length === 1 ? "" : "s"}…`,
 		);
-		const imported = await importAssetFiles(files, assetCategory, addAsset);
-		const lastImported = imported.assets.at(-1);
-		if (lastImported) select(lastImported);
+		const imported = await importAssetFiles(
+			files,
+			assetCategory,
+			addAsset,
+			select,
+		);
 		const failed = imported.failed;
 		setStatus(
 			`Imported ${imported.assets.length} asset${imported.assets.length === 1 ? "" : "s"}${failed ? `; skipped ${failed} file${failed === 1 ? "" : "s"}` : ""}.`,
