@@ -13,6 +13,17 @@ import {
 } from "../src/lib/levelDocument";
 import { createPhaserTilemap } from "../src/lib/phaserTilemap";
 import { putTile, removeTile, tilesFor } from "../src/lib/tileLayers";
+import {
+	cloneLevelDocument,
+	createLevelDocument,
+	hydrateLevelSketch,
+	loadLevelDocuments,
+	loadStoredLevelDocuments,
+	persistLevelDocuments,
+	persistLevelSketch,
+	saveLevelSketch,
+	updateLevelDocument,
+} from "../src/lib/editorSession";
 
 const grass = { name: "grass.png", image: { width: 96, height: 96 } };
 const rock = { name: "rock.png", image: { width: 32, height: 32 } };
@@ -61,6 +72,68 @@ const document = {
 	...saved,
 };
 const cleared = clearLevelContent(document);
+const storage = {
+	values: new Map<string, string>(),
+	getItem(key: string) {
+		return this.values.get(key) || null;
+	},
+	setItem(key: string, value: string) {
+		this.values.set(key, value);
+	},
+};
+const initialDocuments = loadLevelDocuments(null);
+const malformedDocuments = loadLevelDocuments("{not-json");
+const updatedDocuments = updateLevelDocument(
+	initialDocuments,
+	"main",
+	(doc) => ({ ...doc, metadata: { ...doc.metadata, width: 64 } }),
+);
+const savedDocuments = persistLevelSketch(
+	updatedDocuments,
+	"main",
+	new Map([["1,2", stack]]),
+	new Set(["1,2"]),
+);
+persistLevelDocuments(storage, savedDocuments);
+const reloadedDocuments = loadLevelDocuments(
+	storage.getItem("pixel-pipeline-levels"),
+);
+const sourcePlaced = new Map([["1,2", stack]]);
+const levelSketches = saveLevelSketch(
+	{},
+	"main",
+	sourcePlaced,
+	new Set(["1,2"]),
+);
+sourcePlaced.clear();
+const hydratedSession = hydrateLevelSketch(
+	levelSketches,
+	"main",
+	savedDocuments.main,
+	[grass, rock],
+);
+const freshDocument = createLevelDocument("fresh", "Fresh Level");
+const delayedHydration = hydrateLevelSketch(
+	{},
+	"main",
+	savedDocuments.main,
+	[rock],
+);
+const readyHydration = hydrateLevelSketch(
+	delayedHydration.levels,
+	"main",
+	savedDocuments.main,
+	[grass, rock],
+);
+const clonedDocument = cloneLevelDocument(savedDocuments.main);
+clonedDocument.metadata.width = 99;
+const throwingStorage = {
+	getItem() {
+		throw new Error("storage unavailable");
+	},
+	setItem() {},
+};
+const fallbackDocuments = loadStoredLevelDocuments(throwingStorage);
 
 if (
 	tilesFor(stack, layers).length !== 2 ||
@@ -83,7 +156,19 @@ if (
 	Object.values(cleared).some(
 		(value) => Array.isArray(value) && value.length,
 	) ||
-	cleared.metadata !== document.metadata
+	cleared.metadata !== document.metadata ||
+	initialDocuments.main.metadata.width !== 48 ||
+	malformedDocuments.main.metadata.width !== 48 ||
+	reloadedDocuments.main.metadata.width !== 64 ||
+	reloadedDocuments.main.tiles.length !== 2 ||
+	hydratedSession.sketch.placed.get("1,2").terrain.asset !== grass ||
+	levelSketches.main.placed.size !== 1 ||
+	freshDocument.metadata.name !== "Fresh Level" ||
+	savedDocuments.main.metadata.width !== 64 ||
+	fallbackDocuments.main.metadata.width !== 48 ||
+	clonedDocument.metadata.width !== 99 ||
+	Object.keys(delayedHydration.levels).length !== 0 ||
+	readyHydration.sketch.placed.size !== 1
 ) {
 	process.exit(1);
 }

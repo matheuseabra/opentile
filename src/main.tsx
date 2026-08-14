@@ -29,7 +29,6 @@ import "./styles.css";
 import { AssetLibrary } from "./components/AssetLibrary";
 import { LevelCanvas } from "./components/LevelCanvas";
 import {
-	DEFAULT_LAYERS,
 	layersForDocument,
 	layersFor,
 	putTile,
@@ -38,7 +37,6 @@ import {
 } from "./lib/tileLayers";
 import {
 	clearLevelContent,
-	hydrateSketch,
 	normalizeLevel,
 	serializeSketch,
 } from "./lib/levelDocument";
@@ -58,6 +56,16 @@ import {
 	pasteTiles,
 	tilesInRegion,
 } from "./lib/canvasEditor";
+import {
+	cloneLevelDocument,
+	createLevelDocument,
+	hydrateLevelSketch,
+	loadStoredLevelDocuments,
+	persistLevelDocuments,
+	persistLevelSketch,
+	saveLevelSketch,
+	updateLevelDocument,
+} from "./lib/editorSession";
 
 type GridStyle = CSSProperties & { "--grid-size": string };
 
@@ -104,17 +112,6 @@ const defaultAutotileRule = () => ({
 	defaultTile: null,
 	rules: [newAutotileRule(0)],
 });
-const newLevelDoc = (id, name = id) => ({
-	metadata: { id, name, width: 48, height: 36, backgroundSet: "default" },
-	layers: DEFAULT_LAYERS.map((layer) => ({ ...layer })),
-	platforms: [],
-	props: [],
-	pickups: [],
-	enemies: [],
-	exits: [],
-	tiles: [],
-	collisions: [],
-});
 const objectBucket = (type) =>
 	type === "platform"
 		? "platforms"
@@ -135,7 +132,7 @@ function App() {
 		collisionsRef = useRef<Set<string>>(new Set()),
 		historyRef = useRef([]),
 		redoRef = useRef([]),
-		levelsRef = useRef({ main: null });
+		levelsRef = useRef<Record<string, any>>({ main: null });
 	const paintingRef = useRef(false),
 		toolStartRef = useRef(null),
 		panRef = useRef(null),
@@ -160,24 +157,9 @@ function App() {
 		[status, setStatus] = useState(
 			"Upload a tile to add it to your local library.",
 		);
-	const [levelDocs, setLevelDocs] = useState<any>(() => {
-		try {
-			const saved = JSON.parse(
-				localStorage.getItem("pixel-pipeline-levels") || "null",
-			);
-			const { gym, ...docs } = saved || {};
-			return Object.fromEntries(
-				Object.entries({
-					main: newLevelDoc("main", "Main Level"),
-					...docs,
-				}).map(([id, doc]) => [id, normalizeLevel(doc)]),
-			);
-		} catch {
-			return {
-				main: newLevelDoc("main", "Main Level"),
-			};
-		}
-	});
+	const [levelDocs, setLevelDocs] = useState<any>(() =>
+		loadStoredLevelDocuments(window.localStorage),
+	);
 	const [objectSelection, setObjectSelection] = useState(null),
 		[objectMode, setObjectMode] = useState(false),
 		[objectDrag, setObjectDrag] = useState(null);
@@ -205,7 +187,9 @@ function App() {
 	useEffect(() => {
 		setSelectedRegion((region) => ({ ...region, w: t, h: t }));
 	}, [t]);
-	const currentDoc = normalizeLevel(levelDocs[level] || newLevelDoc(level));
+	const currentDoc = normalizeLevel(
+		levelDocs[level] || createLevelDocument(level),
+	);
 	const levelWidth = Math.max(24, Number(currentDoc.metadata.width) || 24);
 	const levelHeight = Math.max(1, Number(currentDoc.metadata.height) || 18);
 	const documentLayers = layersForDocument(currentDoc);
@@ -227,20 +211,20 @@ function App() {
 		)
 			exportCollisions.add(cellKey);
 	const persistLevels = (docs) => {
-		setLevelDocs(docs);
-		localStorage.setItem("pixel-pipeline-levels", JSON.stringify(docs));
+		setLevelDocs(persistLevelDocuments(window.localStorage, docs));
 	};
 	const updateCurrentDoc = (updater) =>
-		persistLevels({ ...levelDocs, [level]: updater(currentDoc) });
+		persistLevels(updateLevelDocument(levelDocs, level, updater));
 	const persistSketch = () => {
-		const sketch = serializeSketch(
-			placedRef.current,
-			collisionsRef.current,
-			documentLayers,
+		persistLevels(
+			persistLevelSketch(
+				levelDocs,
+				level,
+				placedRef.current,
+				collisionsRef.current,
+				documentLayers,
+			),
 		);
-		const docs = { ...levelDocs, [level]: { ...currentDoc, ...sketch } };
-		setLevelDocs(docs);
-		localStorage.setItem("pixel-pipeline-levels", JSON.stringify(docs));
 	};
 	const bump = (save = true) => {
 		if (save) persistSketch();
@@ -509,7 +493,7 @@ function App() {
 		collisions: new Set(collisionsRef.current),
 		assets: [...assetsRef.current],
 		selected,
-		document: currentDoc,
+		document: cloneLevelDocument(currentDoc),
 	});
 	const commit = () => {
 		historyRef.current.push(snapshot());
@@ -519,20 +503,24 @@ function App() {
 	const restore = (s) => {
 		placedRef.current = new Map(s.placed);
 		collisionsRef.current = new Set(s.collisions);
-		levelsRef.current[level] = {
-			placed: new Map(s.placed),
-			collisions: new Set(s.collisions),
-		};
+		levelsRef.current = saveLevelSketch(
+			levelsRef.current,
+			level,
+			s.placed,
+			s.collisions,
+		);
 		assetsRef.current = [...s.assets];
 		setAssets(s.assets);
 		select(s.selected);
-		persistLevels({
-			...levelDocs,
-			[level]: {
-				...s.document,
-				...serializeSketch(s.placed, s.collisions, documentLayers),
-			},
-		});
+		persistLevels(
+			persistLevelSketch(
+				{ ...levelDocs, [level]: s.document },
+				level,
+				s.placed,
+				s.collisions,
+				documentLayers,
+			),
+		);
 		redraw((v) => v + 1);
 	};
 	const undo = () => {
@@ -561,7 +549,12 @@ function App() {
 		commit();
 		placedRef.current.clear();
 		collisionsRef.current.clear();
-		levelsRef.current[level] = { placed: new Map(), collisions: new Set() };
+		levelsRef.current = saveLevelSketch(
+			levelsRef.current,
+			level,
+			new Map(),
+			new Set(),
+		);
 		persistLevels({ ...levelDocs, [level]: clearLevelContent(currentDoc) });
 		setObjectSelection(null);
 		setObjectMode(false);
@@ -594,22 +587,14 @@ function App() {
 			placed: new Map(placedRef.current),
 			collisions: new Set(collisionsRef.current),
 		};
-		let target = levelsRef.current[next];
-		if (!target && levelDocs[next]?.tiles?.length) {
-			const names = new Set(levelDocs[next].tiles.map((tile) => tile.asset));
-			if (
-				[...names].every((name) =>
-					assetsRef.current.some((asset) => asset.name === name),
-				)
-			) {
-				target = hydrateSketch(levelDocs[next], assetsRef.current);
-				levelsRef.current[next] = target;
-			}
-		}
-		if (!target) {
-			target = { placed: new Map(), collisions: new Set() };
-			levelsRef.current[next] = target;
-		}
+		const hydrated = hydrateLevelSketch(
+			levelsRef.current,
+			next,
+			levelDocs[next],
+			assetsRef.current,
+		);
+		levelsRef.current = hydrated.levels;
+		const target = hydrated.sketch;
 		placedRef.current = new Map(target.placed);
 		collisionsRef.current = new Set(target.collisions);
 		setLevel(next);
@@ -623,21 +608,16 @@ function App() {
 
 	useEffect(() => {
 		for (const [id, doc] of Object.entries(levelDocs) as [string, any][]) {
-			if (
-				levelsRef.current[id] ||
-				!(doc.tiles?.length || doc.collisions?.length)
-			)
-				continue;
-			const names = new Set((doc.tiles || []).map((tile) => tile.asset));
-			if (
-				![...names].every((name) =>
-					assetsRef.current.some((asset) => asset.name === name),
-				)
-			)
-				continue;
-			const target = hydrateSketch(doc, assetsRef.current);
+			if (levelsRef.current[id]) continue;
+			const hydrated = hydrateLevelSketch(
+				levelsRef.current,
+				id,
+				doc,
+				assetsRef.current,
+			);
+			levelsRef.current = hydrated.levels;
+			const target = hydrated.sketch;
 			if (target.placed.size || target.collisions.size) {
-				levelsRef.current[id] = target;
 				if (id === level) {
 					placedRef.current = new Map(target.placed);
 					collisionsRef.current = new Set<string>(target.collisions);
@@ -1817,7 +1797,10 @@ function App() {
 											"level-" + (Object.keys(levelDocs).length + 1),
 										);
 										if (!id || levelDocs[id]) return;
-										const docs = { ...levelDocs, [id]: newLevelDoc(id, id) };
+										const docs = {
+							...levelDocs,
+							[id]: createLevelDocument(id, id),
+						};
 										levelsRef.current[id] = {
 											placed: new Map(),
 											collisions: new Set(),
