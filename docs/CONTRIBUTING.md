@@ -6,12 +6,12 @@ Thanks for helping improve OpenTile.
 
 1. Clone the repository: `git clone <repo-url>`.
 2. Install Node dependencies with `npm ci`.
-3. Run `./run.sh` to start the editor at `http://localhost:5173`.
+3. Run `npm run dev -- --host 127.0.0.1` to start the editor at `http://localhost:5173`.
 
 ## Before opening a pull request
 
 - Keep each change focused and update affected documentation.
-- Run `npm run build` and `npm test`.
+- Run `npm test`.
 - For editor interactions, verify the flow manually in the browser and include a screenshot or recording when the UI changes.
 - Do not commit generated exports, local browser data, or credentials.
 

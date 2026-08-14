@@ -22,7 +22,7 @@ Clone the repository, install JavaScript dependencies, and start the editor:
 git clone https://github.com/matheuseabra/opentile.git
 cd opentile
 npm ci
-./run.sh
+npm run dev -- --host 127.0.0.1
 ```
 
 Open <http://localhost:5173>.

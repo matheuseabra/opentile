@@ -10,11 +10,10 @@
 ## Build, Test, and Development
 
 ```sh
-./run.sh             # Start the local editor
+npm run dev          # Start the local editor
 npm run build        # Create the production Vite bundle
-npm run test:unit    # Run atomic React component tests
-npm run test:coverage # Show component coverage and enforce thresholds
-./test.sh            # Run the repository smoke checks
+npm run test:unit    # Run unit tests
+npm run test:coverage # Show source coverage and enforce thresholds
 ```
 
 The editor is served at `http://localhost:5173` when running locally. Run the build and smoke test after UI or interaction changes.
@@ -25,7 +24,7 @@ Use two-space indentation for JavaScript, JSX, and CSS. Keep React behavior clos
 
 ## Testing Guidelines
 
-`./test.sh` is the smoke-test entry point, `npm run test:unit` runs Vitest component tests, and `npm run build` catches JSX and bundling errors. For interaction changes, manually verify the affected flow in the browser, including keyboard shortcuts and both Main Level and Gym where relevant.
+`npm test` runs typecheck, library and component tests, and the production build. `npm run test:coverage` reports source coverage. For interaction changes, manually verify the affected flow in the browser, including keyboard shortcuts and both Main Level and Gym where relevant.
 
 ## Commits and Pull Requests
 

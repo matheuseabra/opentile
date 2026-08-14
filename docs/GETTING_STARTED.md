@@ -4,7 +4,7 @@ Install the JavaScript dependencies and start the Vite editor:
 
 ```sh
 npm ci
-./run.sh
+npm run dev -- --host 127.0.0.1
 ```
 
 Open `http://localhost:5173`.

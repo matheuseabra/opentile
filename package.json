@@ -17,13 +17,13 @@
     "node": "^20.19.0 || >=22.12.0"
   },
   "scripts": {
-    "dev": "vite",
-    "build": "vite build",
+    "dev": "vite --config config/vite.config.ts",
+    "build": "vite build --config config/vite.config.ts",
     "typecheck": "tsc --noEmit",
     "test": "npm run typecheck && npm run test:unit && npm run build",
-    "test:lib": "vitest run tests/lib-smoke.test.ts",
-    "test:unit": "vitest run",
-    "test:coverage": "vitest run --coverage"
+    "test:lib": "vitest run --config config/vitest.config.ts tests/lib-smoke.test.ts",
+    "test:unit": "vitest run --config config/vitest.config.ts",
+    "test:coverage": "vitest run --config config/vitest.config.ts --coverage"
   },
   "dependencies": {
     "@vitejs/plugin-react": "6.0.5",

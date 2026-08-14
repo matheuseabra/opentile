@@ -10,4 +10,4 @@ Please **do not** open a public issue for a suspected vulnerability. Report it p
 
 You should receive an acknowledgment within seven days. Please allow time for a fix and coordinated disclosure before sharing details publicly.
 
-OpenTile's local processing bridge binds to `127.0.0.1` only. Do not expose it directly to a network without adding authentication, stricter request parsing, and content validation.
+OpenTile stores assets and levels in browser storage. Avoid committing exported assets, browser data, credentials, or other private content.
