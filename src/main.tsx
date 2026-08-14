@@ -43,11 +43,15 @@ import {
 import { createPhaserTilemap } from "./lib/phaserTilemap";
 import {
 	createAsset,
-	nextAssetName,
+	hydrateStoredAssets,
 	openAssetStore,
 	persistAsset,
 	readStoredAssets,
+	releaseAsset,
+	releaseAssetNameReservation,
 	removePersistedAsset,
+	reserveAssetName,
+	reserveExactAssetName,
 } from "./lib/assetLibrary";
 import {
 	copyTiles,
@@ -72,18 +76,6 @@ type GridStyle = CSSProperties & { "--grid-size": string };
 const key = (x: number, y: number) => `${x},${y}`;
 const HIGHLIGHT_COLOR = "#55c957";
 const CATEGORIES = ["terrain", "ground", "trees", "objects", "animated"];
-const categoryForName = (name) => {
-	const n = name.toLowerCase();
-	return n.includes("tree") || n.includes("wood")
-		? "trees"
-		: n.includes("anim") || n.includes("walk") || n.includes("run")
-			? "animated"
-			: n.includes("ground") || n.includes("floor")
-				? "ground"
-				: n.includes("object") || n.includes("prop") || n.includes("item")
-					? "objects"
-					: "terrain";
-};
 const OBJECT_TYPES = ["platform", "prop", "pickup", "enemy", "exit"];
 const AUTOTILE_STATES = ["ignored", "required", "empty"];
 const AUTOTILE_OFFSETS = [
@@ -127,7 +119,14 @@ function App() {
 	const canvasRef = useRef(null),
 		stageRef = useRef(null),
 		dbRef = useRef(null),
-		assetsRef = useRef([]);
+		assetsRef = useRef([]),
+		pendingAssetNamesRef = useRef(new Set<string>()),
+		localAssetHydrationReadyRef = useRef<Promise<void> | null>(null),
+		localAssetHydrationSettleRef = useRef<(() => void) | null>(null);
+	if (!localAssetHydrationReadyRef.current)
+		localAssetHydrationReadyRef.current = new Promise((resolve) => {
+			localAssetHydrationSettleRef.current = resolve;
+		});
 	const placedRef = useRef<Map<string, any>>(new Map()),
 		collisionsRef = useRef<Set<string>>(new Set()),
 		historyRef = useRef([]),
@@ -564,19 +563,29 @@ function App() {
 		setStatus("Level cleared. Undo restores it.");
 	};
 
-	const addAsset = (
+	const addAsset = async (
 		blob,
 		originalName = "asset.png",
 		save = true,
 		category = assetCategory,
+		selectOnAdd = true,
 	) => {
-		const name = nextAssetName(assetsRef.current, originalName);
-		createAsset(blob, name, category || categoryForName(name)).then((asset) => {
+		await localAssetHydrationReadyRef.current;
+		const name = reserveAssetName(
+			assetsRef.current,
+			originalName,
+			pendingAssetNamesRef.current,
+		);
+		try {
+			const asset = await createAsset(blob, name, category);
 			assetsRef.current = [...assetsRef.current, asset];
 			setAssets(assetsRef.current);
 			if (save) persistAsset(dbRef.current, asset);
-			select(asset);
-		});
+			if (selectOnAdd) select(asset);
+			return asset;
+		} finally {
+			releaseAssetNameReservation(pendingAssetNamesRef.current, name);
+		}
 	};
 
 	const switchLevel = (next) => {
@@ -628,22 +637,42 @@ function App() {
 	}, [assets, levelDocs, level]);
 
 	useEffect(() => {
+		const settleLocalAssetHydration = () => {
+			localAssetHydrationSettleRef.current?.();
+			localAssetHydrationSettleRef.current = null;
+		};
 		openAssetStore()
-			.then((db) => {
+			.then(async (db) => {
 				dbRef.current = db;
-				return readStoredAssets(db);
-			})
-			.then((items) =>
+				const items = await readStoredAssets(db);
 				items.forEach((item) =>
-					addAsset(
-						item.blob,
-						item.name,
-						false,
-						item.category || categoryForName(item.name),
-					),
-				),
-			)
-			.catch(() => setStatus("Could not load the local asset library."));
+					reserveExactAssetName(pendingAssetNamesRef.current, item.name),
+				);
+				const hydrated = await hydrateStoredAssets(items, undefined, {
+					onSettled: (record) =>
+						releaseAssetNameReservation(
+							pendingAssetNamesRef.current,
+							record.name,
+						),
+				});
+				let lastAsset = null;
+				for (const asset of hydrated.assets) {
+					assetsRef.current = [...assetsRef.current, asset];
+					lastAsset = asset;
+				}
+				setAssets(assetsRef.current);
+				if (lastAsset) select(lastAsset);
+				if (hydrated.failures.length) {
+					const skippedNames = hydrated.failures.map((failure) => failure.name).join(", ");
+					setStatus(
+						hydrated.assets.length
+							? `Loaded ${hydrated.assets.length} local assets. Skipped ${hydrated.failures.length} corrupt record${hydrated.failures.length === 1 ? "" : "s"}: ${skippedNames}.`
+							: `Skipped ${hydrated.failures.length} corrupt local asset record${hydrated.failures.length === 1 ? "" : "s"}: ${skippedNames}.`,
+					);
+				}
+			})
+			.catch(() => setStatus("Could not load the local asset library."))
+			.finally(settleLocalAssetHydration);
 	}, []);
 
 	useEffect(() => {
@@ -1233,14 +1262,20 @@ function App() {
 			if (!response.ok) throw new Error();
 			const blob = await response.blob();
 			const name = file.name.replace(/\.[^.]+$/, "") + ".png";
-			addAsset(blob, name, true, assetCategory);
+			const asset = await addAsset(blob, name, true, assetCategory, false);
 			return {
+				asset,
 				file: new File([blob], name, { type: "image/png" }),
+				failed: false,
 				removed: true,
 			};
 		} catch {
-			addAsset(file, file.name, true, assetCategory);
-			return { file, removed: false };
+			try {
+				const asset = await addAsset(file, file.name, true, assetCategory, false);
+				return { asset, file, failed: false, removed: false };
+			} catch {
+				return { asset: null, file, failed: true, removed: false };
+			}
 		}
 	};
 	const onFiles = async (e) => {
@@ -1251,10 +1286,14 @@ function App() {
 			`Removing backgrounds from ${files.length} asset${files.length === 1 ? "" : "s"}…`,
 		);
 		const imported = await Promise.all(files.map(importAsset));
-		setSourceFile(imported.at(-1).file);
-		const removed = imported.filter((item) => item.removed).length;
+		const successful = imported.filter((item) => !item.failed);
+		const lastImported = successful.at(-1);
+		if (lastImported?.asset) select(lastImported.asset);
+		if (lastImported?.file) setSourceFile(lastImported.file);
+		const removed = successful.filter((item) => item.removed).length;
+		const failed = imported.length - successful.length;
 		setStatus(
-			`Imported ${files.length} asset${files.length === 1 ? "" : "s"}; removed ${removed} background${removed === 1 ? "" : "s"}.`,
+			`Imported ${successful.length} asset${successful.length === 1 ? "" : "s"}; removed ${removed} background${removed === 1 ? "" : "s"}${failed ? `; skipped ${failed} file${failed === 1 ? "" : "s"}` : ""}.`,
 		);
 	};
 	const pickerCell = (e) => {
@@ -1429,7 +1468,7 @@ function App() {
 			if (!response.ok) return setStatus(await response.text());
 			const blob = await response.blob();
 			setSourceFile(new File([blob], "fixed.png", { type: "image/png" }));
-			addAsset(blob, "fixed.png");
+			await addAsset(blob, "fixed.png");
 			setStatus("Fixed asset imported.");
 		} catch {
 			setStatus(
@@ -1456,7 +1495,7 @@ function App() {
 			setSourceFile(
 				new File([blob], "background-removed.png", { type: "image/png" }),
 			);
-			addAsset(blob, "background-removed.png");
+			await addAsset(blob, "background-removed.png");
 			setStatus("Background removed and asset imported.");
 		} catch {
 			setStatus("Could not remove the background.");
@@ -1634,6 +1673,7 @@ function App() {
 		}
 		assetsRef.current = assetsRef.current.filter((a) => a !== asset);
 		setAssets(assetsRef.current);
+		releaseAsset(asset);
 		removePersistedAsset(dbRef.current, asset.name);
 		if (selected === asset) select(null);
 		bump();

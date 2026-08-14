@@ -1,4 +1,13 @@
-import { nextAssetName } from "../src/lib/assetLibrary";
+import {
+	categoryForName,
+	createAsset,
+	hydrateStoredAssets,
+	nextAssetName,
+	releaseAsset,
+	releaseAssetNameReservation,
+	reserveAssetName,
+	reserveExactAssetName,
+} from "../src/lib/assetLibrary";
 import {
 	copyTiles,
 	deleteTiles,
@@ -135,40 +144,168 @@ const throwingStorage = {
 };
 const fallbackDocuments = loadStoredLevelDocuments(throwingStorage);
 
-if (
-	tilesFor(stack, layers).length !== 2 ||
-	removeTile(stack, "decoration").terrain.asset !== grass ||
-	loaded.placed.get("2,3").terrain.attributes.hazard !== true ||
-	loaded.placed.get("2,3").terrain.autotile.x !== 0 ||
-	saved.tiles[0].attributes.hazard !== true ||
-	nextAssetName([{ name: "grass.png" }], "grass.png") !== "grass-1.png" ||
-	placed.size !== 1 ||
-	collisions.size ||
-	region.length !== 4 ||
-	region[3].x !== 1 ||
-	region[3].y !== 1 ||
-	region[3].sx !== 32 ||
-	region[3].sy !== 48 ||
-	tilemap.layers.length !== 3 ||
-	tilemap.layers[0].data[14] !== 1 ||
-	tilemap.layers[1].objects[0].width !== 32 ||
-	tilemap.layers[2].objects[0].properties[0].name !== "hazard" ||
-	Object.values(cleared).some(
-		(value) => Array.isArray(value) && value.length,
-	) ||
-	cleared.metadata !== document.metadata ||
-	initialDocuments.main.metadata.width !== 48 ||
-	malformedDocuments.main.metadata.width !== 48 ||
-	reloadedDocuments.main.metadata.width !== 64 ||
-	reloadedDocuments.main.tiles.length !== 2 ||
-	hydratedSession.sketch.placed.get("1,2").terrain.asset !== grass ||
-	levelSketches.main.placed.size !== 1 ||
-	freshDocument.metadata.name !== "Fresh Level" ||
-	savedDocuments.main.metadata.width !== 64 ||
-	fallbackDocuments.main.metadata.width !== 48 ||
-	clonedDocument.metadata.width !== 99 ||
-	Object.keys(delayedHydration.levels).length !== 0 ||
-	readyHydration.sketch.placed.size !== 1
-) {
-	process.exit(1);
-}
+const makeImageAdapters = (behaviors: string[]) => {
+	const revoked: string[] = [];
+	let index = 0;
+	return {
+		revoked,
+		adapters: {
+			createObjectUrl: () => `blob:${index + 1}`,
+			revokeObjectUrl: (url: string) => revoked.push(url),
+			createImage: () => {
+				const behavior = behaviors[index++] || "load";
+				const image = {
+					onload: null,
+					onerror: null,
+					decode:
+						behavior === "decode-fail"
+							? () => Promise.reject(new Error("decode failed"))
+							: () => Promise.resolve(),
+				};
+				Object.defineProperty(image, "src", {
+					set() {
+						queueMicrotask(() => {
+							if (behavior === "error") image.onerror?.(new Error("load failed"));
+							else image.onload?.();
+						});
+					},
+				});
+				return image;
+			},
+		},
+	};
+};
+
+const run = async () => {
+	const successMocks = makeImageAdapters(["load"]);
+	const createdTree = await createAsset(
+		new Blob(["tree"]),
+		"tree-tiles.png",
+		"",
+		successMocks.adapters,
+	);
+	const createdTreeUrl = createdTree.url;
+	releaseAsset(createdTree, successMocks.adapters);
+
+	const decodeFailureMocks = makeImageAdapters(["decode-fail"]);
+	let decodeFailureMessage = "";
+	try {
+		await createAsset(
+			new Blob(["bad"]),
+			"broken.png",
+			"terrain",
+			decodeFailureMocks.adapters,
+		);
+	} catch (error) {
+		decodeFailureMessage = error instanceof Error ? error.message : String(error);
+	}
+
+	const reservedNames = new Set<string>();
+	const firstReservedName = reserveAssetName(
+		[{ name: "grass.png" }],
+		"grass.png",
+		reservedNames,
+	);
+	const secondReservedName = reserveAssetName(
+		[{ name: "grass.png" }],
+		"grass.png",
+		reservedNames,
+	);
+	releaseAssetNameReservation(reservedNames, firstReservedName);
+	const reusedReservedName = reserveAssetName(
+		[{ name: "grass.png" }],
+		"grass.png",
+		reservedNames,
+	);
+	releaseAssetNameReservation(reservedNames, secondReservedName);
+	releaseAssetNameReservation(reservedNames, reusedReservedName);
+
+	const exactReservedNames = new Set<string>();
+	const exactReservedName = reserveExactAssetName(
+		exactReservedNames,
+		"grass.png",
+	);
+	const exactFollowupName = reserveAssetName(
+		[],
+		"grass.png",
+		exactReservedNames,
+	);
+	releaseAssetNameReservation(exactReservedNames, exactReservedName);
+	releaseAssetNameReservation(exactReservedNames, exactFollowupName);
+
+	const hydrationMocks = makeImageAdapters(["load", "error"]);
+	const hydratedAssets = await hydrateStoredAssets(
+		[
+			{ name: "wood-floor.png", blob: new Blob(["ok"]) },
+			{ name: "broken.png", blob: new Blob(["bad"]), category: "objects" },
+		],
+		hydrationMocks.adapters,
+	);
+	if (hydratedAssets.assets[0]) releaseAsset(hydratedAssets.assets[0], hydrationMocks.adapters);
+
+	if (
+		tilesFor(stack, layers).length !== 2 ||
+		removeTile(stack, "decoration").terrain.asset !== grass ||
+		loaded.placed.get("2,3").terrain.attributes.hazard !== true ||
+		loaded.placed.get("2,3").terrain.autotile.x !== 0 ||
+		saved.tiles[0].attributes.hazard !== true ||
+		nextAssetName([{ name: "grass.png" }], "grass.png") !== "grass-1.png" ||
+		nextAssetName([], "grass.png", ["grass.png", "grass-1.png"]) !==
+			"grass-2.png" ||
+		categoryForName("tree-tiles.png") !== "trees" ||
+		categoryForName("walk-cycle.png") !== "animated" ||
+		firstReservedName !== "grass-1.png" ||
+		secondReservedName !== "grass-2.png" ||
+		reusedReservedName !== "grass-1.png" ||
+		reservedNames.size !== 0 ||
+		exactReservedName !== "grass.png" ||
+		exactFollowupName !== "grass-1.png" ||
+		exactReservedNames.size !== 0 ||
+		placed.size !== 1 ||
+		collisions.size ||
+		region.length !== 4 ||
+		region[3].x !== 1 ||
+		region[3].y !== 1 ||
+		region[3].sx !== 32 ||
+		region[3].sy !== 48 ||
+		tilemap.layers.length !== 3 ||
+		tilemap.layers[0].data[14] !== 1 ||
+		tilemap.layers[1].objects[0].width !== 32 ||
+		tilemap.layers[2].objects[0].properties[0].name !== "hazard" ||
+		Object.values(cleared).some(
+			(value) => Array.isArray(value) && value.length,
+		) ||
+		cleared.metadata !== document.metadata ||
+		initialDocuments.main.metadata.width !== 48 ||
+		malformedDocuments.main.metadata.width !== 48 ||
+		reloadedDocuments.main.metadata.width !== 64 ||
+		reloadedDocuments.main.tiles.length !== 2 ||
+		hydratedSession.sketch.placed.get("1,2").terrain.asset !== grass ||
+		levelSketches.main.placed.size !== 1 ||
+		freshDocument.metadata.name !== "Fresh Level" ||
+		savedDocuments.main.metadata.width !== 64 ||
+		fallbackDocuments.main.metadata.width !== 48 ||
+		clonedDocument.metadata.width !== 99 ||
+		Object.keys(delayedHydration.levels).length !== 0 ||
+		readyHydration.sketch.placed.size !== 1 ||
+		createdTree.category !== "trees" ||
+		successMocks.revoked.length !== 1 ||
+		successMocks.revoked[0] !== createdTreeUrl ||
+		decodeFailureMessage !== "Could not load broken.png" ||
+		decodeFailureMocks.revoked.length !== 1 ||
+		decodeFailureMocks.revoked[0] !== "blob:1" ||
+		hydratedAssets.assets.length !== 1 ||
+		hydratedAssets.assets[0].category !== "trees" ||
+		hydratedAssets.failures.length !== 1 ||
+		hydratedAssets.failures[0].name !== "broken.png" ||
+		!(hydratedAssets.failures[0].error instanceof Error) ||
+		hydratedAssets.failures[0].error.message !== "Could not load broken.png" ||
+		hydrationMocks.revoked.length !== 2 ||
+		hydrationMocks.revoked[0] !== "blob:2" ||
+		hydrationMocks.revoked[1] !== hydratedAssets.assets[0].url
+	) {
+		process.exit(1);
+	}
+};
+
+await run();
