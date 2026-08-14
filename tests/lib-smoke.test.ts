@@ -1,3 +1,5 @@
+import { describe, it } from "vitest";
+import { importAssetFiles } from "../src/lib/assetImport";
 import {
 	categoryForName,
 	createAsset,
@@ -291,6 +293,27 @@ const makeImageAdapters = (behaviors: string[]) => {
 };
 
 const run = async () => {
+	const importCalls: any[] = [];
+	const selectedImports: any[] = [];
+	const importedAssets = await importAssetFiles(
+		[{ name: "tree.png" }, { name: "broken.png" }, { name: "rock.png" }],
+		"trees",
+		async (file, name, save, category, selectOnAdd) => {
+			importCalls.push({ file, name, save, category, selectOnAdd });
+			if (name === "broken.png") throw new Error("import failed");
+			return { name };
+		},
+		(asset) => selectedImports.push(asset),
+	);
+	const failedImport = await importAssetFiles(
+		[{ name: "broken.png" }],
+		"terrain",
+		async () => {
+			throw new Error("import failed");
+		},
+		(asset) => selectedImports.push(asset),
+	);
+	const emptyImport = await importAssetFiles([], "terrain", async () => null);
 	const successMocks = makeImageAdapters(["load"]);
 	const createdTree = await createAsset(
 		new Blob(["tree"]),
@@ -478,6 +501,24 @@ const run = async () => {
 		createdTree.category !== "trees" ||
 		successMocks.revoked.length !== 1 ||
 		successMocks.revoked[0] !== createdTreeUrl ||
+		importedAssets.assets.length !== 2 ||
+		importedAssets.assets[0].name !== "tree.png" ||
+		importedAssets.assets[1].name !== "rock.png" ||
+		importedAssets.failed !== 1 ||
+		selectedImports.length !== 1 ||
+		selectedImports[0].name !== "rock.png" ||
+		failedImport.assets.length !== 0 ||
+		failedImport.failed !== 1 ||
+		importCalls.length !== 3 ||
+		importCalls[0].file.name !== "tree.png" ||
+		importCalls[0].name !== "tree.png" ||
+		!importCalls[0].save ||
+		importCalls[0].category !== "trees" ||
+		importCalls[0].selectOnAdd ||
+		importCalls[1].name !== "broken.png" ||
+		importCalls[2].name !== "rock.png" ||
+		emptyImport.assets.length !== 0 ||
+		emptyImport.failed !== 0 ||
 		decodeFailureMessage !== "Could not load broken.png" ||
 		decodeFailureMocks.revoked.length !== 1 ||
 		decodeFailureMocks.revoked[0] !== "blob:1" ||
@@ -491,8 +532,12 @@ const run = async () => {
 		hydrationMocks.revoked[0] !== "blob:2" ||
 		hydrationMocks.revoked[1] !== hydratedAssets.assets[0].url
 	) {
-		process.exit(1);
+		throw new Error("Library smoke checks failed");
 	}
 };
 
-await run();
+describe("library modules", () => {
+	it("preserves editor, asset, and export invariants", async () => {
+		await run();
+	});
+});
