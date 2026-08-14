@@ -55,6 +55,7 @@ import {
 } from "./lib/assetLibrary";
 import {
 	copyTiles,
+	cutTiles,
 	deleteTiles,
 	moveTiles,
 	pasteTiles,
@@ -494,10 +495,13 @@ function App() {
 		selected,
 		document: cloneLevelDocument(currentDoc),
 	});
-	const commit = () => {
-		historyRef.current.push(snapshot());
+	const pushHistory = (entry) => {
+		historyRef.current.push(entry);
 		redoRef.current = [];
 		if (historyRef.current.length > 100) historyRef.current.shift();
+	};
+	const commit = () => {
+		pushHistory(snapshot());
 	};
 	const restore = (s) => {
 		placedRef.current = new Map(s.placed);
@@ -938,30 +942,33 @@ function App() {
 	};
 	const copySelection = () => {
 		const area = selection || { x: lastTile.x, y: lastTile.y, w: 1, h: 1 },
-			value = placedRef.current.get(key(area.x, area.y));
-		if (!value && !selection)
+			cell = key(area.x, area.y),
+			value = placedRef.current.get(cell),
+			hasCollision = collisionsRef.current.has(cell);
+		if (!value && !hasCollision && !selection)
 			return setStatus("No tile at the keyboard cursor to copy.");
 		clipboardSizeRef.current = { w: area.w, h: area.h };
-		clipboardRef.current = copyTiles(placedRef.current, area);
+		clipboardRef.current = copyTiles(
+			placedRef.current,
+			area,
+			collisionsRef.current,
+		);
 		setStatus(`Copied ${area.w}×${area.h} tile area.`);
 	};
 	const cutSelection = () => {
 		const area = selection || { x: lastTile.x, y: lastTile.y, w: 1, h: 1 },
-			value = placedRef.current.get(key(area.x, area.y));
-		if (!value && !selection)
+			cell = key(area.x, area.y),
+			value = placedRef.current.get(cell),
+			hasCollision = collisionsRef.current.has(cell);
+		if (!value && !hasCollision && !selection)
 			return setStatus("No tile at the keyboard cursor to cut.");
 		commit();
 		clipboardSizeRef.current = { w: area.w, h: area.h };
-		clipboardRef.current = [];
-		for (let y = area.y; y < area.y + area.h; y++)
-			for (let x = area.x; x < area.x + area.w; x++) {
-				const k = key(x, y),
-					v = placedRef.current.get(k);
-				if (v)
-					clipboardRef.current.push({ x: x - area.x, y: y - area.y, value: v });
-				placedRef.current.delete(k);
-				collisionsRef.current.delete(k);
-			}
+		clipboardRef.current = cutTiles(
+			placedRef.current,
+			collisionsRef.current,
+			area,
+		);
 		resolveAutotile();
 		bump();
 		setStatus(`Cut ${area.w}×${area.h} tile area.`);
@@ -976,6 +983,7 @@ function App() {
 			lastTile,
 			levelWidth,
 			levelHeight,
+			collisionsRef.current,
 		);
 		if (mode === "select") setSelection({ x: lastTile.x, y: lastTile.y, w, h });
 		resolveAutotile();
@@ -1001,7 +1009,7 @@ function App() {
 			y + selection.h > levelHeight
 		)
 			return setStatus("Selection is already at the level edge.");
-		commit();
+		const beforeMove = snapshot();
 		const moved = moveTiles(
 			placedRef.current,
 			collisionsRef.current,
@@ -1009,6 +1017,11 @@ function App() {
 			dx,
 			dy,
 		);
+		if (moved.x === selection.x && moved.y === selection.y) {
+			setStatus("Move blocked.");
+			return false;
+		}
+		pushHistory(beforeMove);
 		setSelection((s) => ({ ...s, ...moved }));
 		setLastTile((p) => ({ x: p.x + dx, y: p.y + dy }));
 		resolveAutotile();

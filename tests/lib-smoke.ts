@@ -10,6 +10,7 @@ import {
 } from "../src/lib/assetLibrary";
 import {
 	copyTiles,
+	cutTiles,
 	deleteTiles,
 	moveTiles,
 	pasteTiles,
@@ -54,11 +55,124 @@ const loaded = hydrateSketch(saved, [grass, rock]);
 const placed = new Map([["1,1", stack]]);
 const collisions = new Set(["1,1"]);
 const area = { x: 1, y: 1, w: 1, h: 1 };
-const clipboard = copyTiles(placed, area);
-pasteTiles(placed, clipboard, { x: 2, y: 2 }, 4, 4);
+const clipboard = copyTiles(placed, area, collisions);
+pasteTiles(placed, clipboard, { x: 2, y: 2 }, 4, 4, collisions);
 moveTiles(placed, collisions, area, 1, 0);
 deleteTiles(placed, collisions, { x: 2, y: 1, w: 1, h: 1 });
 const region = tilesInRegion({ x: 16, y: 32, w: 32, h: 32 }, 16);
+
+const cutPlaced = new Map([
+	["2,2", stack],
+	["3,2", { terrain: { asset: rock, sx: 0, sy: 0 } }],
+]);
+const cutCollisions = new Set(["2,2", "3,2", "9,9"]);
+const cutClipboard = cutTiles(cutPlaced, cutCollisions, {
+	x: 2,
+	y: 2,
+	w: 2,
+	h: 1,
+});
+
+const collisionOnlyClipboard = copyTiles(
+	new Map(),
+	{ x: 5, y: 5, w: 1, h: 1 },
+	new Set(["5,5"]),
+);
+const collisionOnlyPastePlaced = new Map();
+const collisionOnlyPasteCollisions = new Set<string>();
+pasteTiles(
+	collisionOnlyPastePlaced,
+	collisionOnlyClipboard,
+	{ x: 7, y: 8 },
+	10,
+	10,
+	collisionOnlyPasteCollisions,
+);
+
+const pasteClipPlaced = new Map();
+pasteTiles(
+	pasteClipPlaced,
+	[
+		{ x: 0, y: 0, value: stack },
+		{ x: 1, y: 0, value: { terrain: { asset: rock, sx: 0, sy: 0 } } },
+		{ x: 0, y: 1, value: { decoration: { asset: rock, sx: 0, sy: 0 } } },
+	],
+	{ x: 3, y: 3 },
+	4,
+	4,
+);
+
+const movePlaced = new Map([
+	["1,1", stack],
+	["3,1", { terrain: { asset: grass, sx: 32, sy: 0 } }],
+]);
+const moveCollisions = new Set(["1,1", "3,1"]);
+const moveResult = moveTiles(
+	movePlaced,
+	moveCollisions,
+	{ x: 1, y: 1, w: 2, h: 1 },
+	1,
+	0,
+);
+
+const blockedMovePlaced = new Map([
+	["1,1", stack],
+	["2,1", { terrain: { asset: rock, sx: 0, sy: 0 } }],
+	["3,1", { terrain: { asset: grass, sx: 32, sy: 0 } }],
+]);
+const blockedMoveCollisions = new Set(["1,1", "2,1", "3,1"]);
+const blockedMoveResult = moveTiles(
+	blockedMovePlaced,
+	blockedMoveCollisions,
+	{ x: 1, y: 1, w: 2, h: 1 },
+	1,
+	0,
+);
+
+const blockedCollisionMovePlaced = new Map([["1,1", stack]]);
+const blockedCollisionMoveCollisions = new Set(["1,1", "2,1"]);
+const blockedCollisionMoveResult = moveTiles(
+	blockedCollisionMovePlaced,
+	blockedCollisionMoveCollisions,
+	{ x: 1, y: 1, w: 1, h: 1 },
+	1,
+	0,
+);
+
+const stackCopyPlaced = new Map([["4,4", stack]]);
+const stackClipboard = copyTiles(
+	stackCopyPlaced,
+	{ x: 4, y: 4, w: 1, h: 1 },
+	new Set(["4,4"]),
+);
+const stackPastePlaced = new Map();
+const stackPasteCollisions = new Set<string>();
+pasteTiles(
+	stackPastePlaced,
+	stackClipboard,
+	{ x: 6, y: 7 },
+	10,
+	10,
+	stackPasteCollisions,
+);
+const stackCutPlaced = new Map([["4,4", stack]]);
+const stackCutCollisions = new Set(["4,4"]);
+const stackCutClipboard = cutTiles(stackCutPlaced, stackCutCollisions, {
+	x: 4,
+	y: 4,
+	w: 1,
+	h: 1,
+});
+const stackCutPastePlaced = new Map();
+const stackCutPasteCollisions = new Set<string>();
+pasteTiles(
+	stackCutPastePlaced,
+	stackCutClipboard,
+	{ x: 0, y: 0 },
+	10,
+	10,
+	stackCutPasteCollisions,
+);
 const layers = [
 	{ id: "terrain", name: "Terrain", visible: true, collision: false },
 	{ id: "decoration", name: "Decoration", visible: false, collision: false },
@@ -262,7 +376,80 @@ const run = async () => {
 		exactFollowupName !== "grass-1.png" ||
 		exactReservedNames.size !== 0 ||
 		placed.size !== 1 ||
-		collisions.size ||
+		collisions.size !== 1 ||
+		!collisions.has("2,2") ||
+		cutClipboard.length !== 2 ||
+		cutClipboard[0].x !== 0 ||
+		cutClipboard[0].y !== 0 ||
+		cutClipboard[0].value !== stack ||
+		cutClipboard[0].collision !== true ||
+		cutClipboard[1].x !== 1 ||
+		cutClipboard[1].y !== 0 ||
+		cutClipboard[1].value.terrain.asset !== rock ||
+		cutClipboard[1].collision !== true ||
+		collisionOnlyClipboard.length !== 1 ||
+		collisionOnlyClipboard[0].value !== undefined ||
+		collisionOnlyClipboard[0].collision !== true ||
+		collisionOnlyPastePlaced.size !== 0 ||
+		collisionOnlyPasteCollisions.size !== 1 ||
+		!collisionOnlyPasteCollisions.has("7,8") ||
+		cutPlaced.size !== 0 ||
+		cutCollisions.size !== 1 ||
+		!cutCollisions.has("9,9") ||
+		cutCollisions.has("2,2") ||
+		cutCollisions.has("3,2") ||
+		pasteClipPlaced.size !== 1 ||
+		!pasteClipPlaced.has("3,3") ||
+		pasteClipPlaced.has("4,3") ||
+		pasteClipPlaced.has("3,4") ||
+		pasteClipPlaced.get("3,3") !== stack ||
+		moveResult.x !== 2 ||
+		moveResult.y !== 1 ||
+		movePlaced.has("1,1") ||
+		movePlaced.get("2,1") !== stack ||
+		movePlaced.get("3,1").terrain.asset !== grass ||
+		movePlaced.get("3,1").terrain.sx !== 32 ||
+		movePlaced.get("3,1").terrain.sy !== 0 ||
+		moveCollisions.size !== 2 ||
+		!moveCollisions.has("2,1") ||
+		!moveCollisions.has("3,1") ||
+		blockedMoveResult.x !== 1 ||
+		blockedMoveResult.y !== 1 ||
+		blockedMovePlaced.get("1,1") !== stack ||
+		blockedMovePlaced.get("2,1").terrain.asset !== rock ||
+		blockedMovePlaced.get("3,1").terrain.asset !== grass ||
+		blockedMovePlaced.size !== 3 ||
+		blockedMoveCollisions.size !== 3 ||
+		!blockedMoveCollisions.has("1,1") ||
+		!blockedMoveCollisions.has("2,1") ||
+		!blockedMoveCollisions.has("3,1") ||
+		blockedCollisionMoveResult.x !== 1 ||
+		blockedCollisionMoveResult.y !== 1 ||
+		blockedCollisionMovePlaced.get("1,1") !== stack ||
+		blockedCollisionMovePlaced.size !== 1 ||
+		blockedCollisionMoveCollisions.size !== 2 ||
+		!blockedCollisionMoveCollisions.has("1,1") ||
+		!blockedCollisionMoveCollisions.has("2,1") ||
+		stackClipboard.length !== 1 ||
+		stackClipboard[0].x !== 0 ||
+		stackClipboard[0].y !== 0 ||
+		stackClipboard[0].collision !== true ||
+		stackPasteCollisions.size !== 1 ||
+		!stackPasteCollisions.has("6,7") ||
+		tilesFor(stackPastePlaced.get("6,7"), layers).length !== 2 ||
+		stackPastePlaced.get("6,7").terrain.asset !== grass ||
+		stackPastePlaced.get("6,7").terrain.attributes.hazard !== true ||
+		stackPastePlaced.get("6,7").terrain.autotile.x !== 0 ||
+		stackPastePlaced.get("6,7").decoration.asset !== rock ||
+		tilesFor(stackCutPastePlaced.get("0,0"), layers).length !== 2 ||
+		stackCutPastePlaced.get("0,0").terrain.asset !== grass ||
+		stackCutPastePlaced.get("0,0").terrain.attributes.hazard !== true ||
+		stackCutPastePlaced.get("0,0").terrain.autotile.x !== 0 ||
+		stackCutPastePlaced.get("0,0").decoration.asset !== rock ||
+		stackCutPasteCollisions.size !== 1 ||
+		!stackCutPasteCollisions.has("0,0") ||
+		stackCutPlaced.size !== 0 ||
+		stackCutCollisions.size !== 0 ||
 		region.length !== 4 ||
 		region[3].x !== 1 ||
 		region[3].y !== 1 ||
