@@ -22,7 +22,8 @@
     "typecheck": "tsc --noEmit",
     "test": "npm run typecheck && npm run test:lib && npm run test:unit && npm run build",
     "test:lib": "tsx tests/lib-smoke.ts",
-    "test:unit": "vitest run"
+    "test:unit": "vitest run",
+    "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
     "@vitejs/plugin-react": "6.0.5",
@@ -37,6 +38,7 @@
     "@types/node": "26.2.0",
     "@types/react": "19.2.18",
     "@types/react-dom": "19.2.4",
+    "@vitest/coverage-v8": "4.1.10",
     "jsdom": "30.0.1",
     "tsx": "4.23.12",
     "typescript": "7.0.2",

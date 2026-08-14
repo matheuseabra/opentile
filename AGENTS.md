@@ -13,6 +13,7 @@
 ./run.sh             # Start the local editor
 npm run build        # Create the production Vite bundle
 npm run test:unit    # Run atomic React component tests
+npm run test:coverage # Show component coverage and enforce thresholds
 ./test.sh            # Run the repository smoke checks
 ```
 

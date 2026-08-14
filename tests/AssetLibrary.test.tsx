@@ -2,7 +2,7 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AssetLibrary } from "../src/components/AssetLibrary";
 
-const categories = ["terrain", "trees"];
+const categories = ["terrain", "trees", "objects"];
 const grass = { name: "grass.png", category: "terrain", url: "blob:grass" };
 const tree = { name: "tree.png", category: "trees", url: "blob:tree" };
 const rock = { name: "rock.png", url: "blob:rock" };

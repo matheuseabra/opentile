@@ -67,6 +67,7 @@ describe("LevelCanvas", () => {
 		fireEvent.pointerDown(canvas);
 		fireEvent.pointerMove(canvas);
 		fireEvent.pointerUp(canvas);
+		fireEvent.contextMenu(canvas);
 
 		expect(props.setMode).toHaveBeenNthCalledWith(1, "select");
 		expect(props.setMode).toHaveBeenNthCalledWith(2, "brush");
@@ -79,6 +80,19 @@ describe("LevelCanvas", () => {
 		expect(props.onUp).toHaveBeenCalledTimes(3);
 		expect(props.onCanvasWheel).toHaveBeenCalledOnce();
 		expect(props.onDown).toHaveBeenCalledOnce();
+	});
+
+	it("marks each editing mode as active", () => {
+		const { container, rerender, props } = renderCanvas();
+		rerender(<LevelCanvas {...props} mode="select" />);
+		expect(
+			container.querySelector('button[aria-label="Rectangular select (M)"]'),
+		).toHaveClass("active");
+
+		rerender(<LevelCanvas {...props} mode="eraser" />);
+		expect(container.querySelector('button[aria-label="Eraser (E)"]')).toHaveClass(
+			"active",
+		);
 	});
 
 	it("supports a quiet canvas without debug information or a grid", () => {
