@@ -1,19 +1,12 @@
-# ▓▓ OpenTile
+# OpenTile
+
+![OpenTile editor](docs/editor-screenshot.png)
 
 > **Pixel-art cleanup → tile painting → level sketch → game-ready exports**
 
 OpenTile is a local-first pixel-art level editor for quickly sketching 2D
 levels. It keeps assets in IndexedDB and level documents in browser storage;
 the optional image-processing bridge runs only on your machine.
-
-```text
-┌──────────────┐   ┌──────────────┐   ┌──────────────┐
-│  IMAGEGEN    │ → │  PIXEL FIX   │ → │  LEVEL GRID  │
-│  sprites     │   │  hard edges  │   │  Godot .tscn │
-└──────────────┘   └──────────────┘   └──────────────┘
-```
-
-![OpenTile editor](docs/editor-screenshot.png)
 
 ## Run locally
 
@@ -22,7 +15,8 @@ the optional image-processing bridge runs only on your machine.
 - Node.js `^20.19.0 || >=22.12.0`
 - Python 3.11–3.13 (for local background removal)
 - Rust/Cargo (for the bundled pixel-art fixer)
-- Git
+
+### Install
 
 Clone with the fixer submodule, install JavaScript dependencies, and start the
 editor:
@@ -72,14 +66,3 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for local-development and pull-request
 guidance. Report vulnerabilities privately using [SECURITY.md](SECURITY.md).
 OpenTile is released under the [MIT License](LICENSE); the bundled
 pixel-art fixer remains subject to its own license.
-
-## Project map
-
-```text
-src/main.tsx       React/Vite editor
-src/styles.css     pixel-art UI styling
-server.py          loopback image-processing bridge
-assets/            intentional sample/generated art
-vendor/            bundled pixel-art fixer
-docs/              setup, schema, shortcuts, and export notes
-```
