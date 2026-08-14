@@ -1,9 +1,9 @@
 # Asset pipeline
 
-The intended flow is:
+The editor keeps the asset flow local to the browser:
 
 ```text
-image generation → pixel-grid fixing → background removal → categorization → tileset selection → level authoring
+image file → direct browser import → IndexedDB asset catalog → tileset selection → level authoring
 ```
 
 ## Asset requirements
@@ -13,18 +13,15 @@ image generation → pixel-grid fixing → background removal → categorization
 - Keep hard pixel edges, limited colors, and no text or gradients.
 - For sprite sheets, keep frames aligned to the same grid.
 
-## Processing tools
+## Import behavior
 
-- **Fix pixel grid** sends the selected source file to the local pixel-art fixer.
-- Asset uploads are sent to the local Python bridge, which uses `rembg` to
-  remove the background and imports the transparent PNG result. If processing
-  fails, the original file is imported instead. `./run.sh` creates a virtual
-  environment and installs the direct dependency version recorded in
-  `requirements.txt`; no
-  API key is required.
-- **Remove background** repeats that local processing for the most recently
-  uploaded source image.
-- The catalog stores the processed file and its category in IndexedDB.
+- Choose one or more image files in the editor.
+- Files are imported directly without a server or image-processing dependency.
+- The selected category is stored with each asset.
+- Asset data and object URLs are managed by the browser asset library.
+- The catalog stores the original file in IndexedDB.
 - Existing files without category metadata receive a filename-based fallback category.
 
-The automatic upload flow imports the processed PNG under the source filename. Use the fallback original only when the API cannot process it.
+For pixel-grid cleanup or background removal, prepare the image before importing
+it. OpenTile focuses on tileset selection, level authoring, and game-ready
+exports.
