@@ -28,6 +28,7 @@ import {
 import "./styles.css";
 import { AssetLibrary } from "./components/AssetLibrary";
 import { LevelCanvas } from "./components/LevelCanvas";
+import { importAssetFiles } from "./lib/assetImport";
 import {
 	layersForDocument,
 	layersFor,
@@ -1270,30 +1271,12 @@ function App() {
 		setStatus(
 			`Importing ${files.length} asset${files.length === 1 ? "" : "s"}…`,
 		);
-		const imported = await Promise.all(
-			files.map(async (file) => {
-				try {
-					return {
-						asset: await addAsset(
-							file,
-							file.name,
-							true,
-							assetCategory,
-							false,
-						),
-						failed: false,
-					};
-				} catch {
-					return { asset: null, failed: true };
-				}
-			}),
-		);
-		const successful = imported.filter((item) => !item.failed);
-		const lastImported = successful.at(-1);
-		if (lastImported?.asset) select(lastImported.asset);
-		const failed = imported.length - successful.length;
+		const imported = await importAssetFiles(files, assetCategory, addAsset);
+		const lastImported = imported.assets.at(-1);
+		if (lastImported) select(lastImported);
+		const failed = imported.failed;
 		setStatus(
-			`Imported ${successful.length} asset${successful.length === 1 ? "" : "s"}${failed ? `; skipped ${failed} file${failed === 1 ? "" : "s"}` : ""}.`,
+			`Imported ${imported.assets.length} asset${imported.assets.length === 1 ? "" : "s"}${failed ? `; skipped ${failed} file${failed === 1 ? "" : "s"}` : ""}.`,
 		);
 	};
 	const pickerCell = (e) => {
