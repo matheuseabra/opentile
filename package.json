@@ -20,8 +20,9 @@
     "dev": "vite",
     "build": "vite build",
     "typecheck": "tsc --noEmit",
-    "test": "./test.sh",
-    "test:lib": "tsx tests/lib-smoke.ts"
+    "test": "./test.sh && npm run test:unit",
+    "test:lib": "tsx tests/lib-smoke.ts",
+    "test:unit": "vitest run"
   },
   "dependencies": {
     "@vitejs/plugin-react": "6.0.5",
@@ -31,10 +32,14 @@
     "vite": "8.2.1"
   },
   "devDependencies": {
+    "@testing-library/jest-dom": "7.0.1",
+    "@testing-library/react": "16.3.2",
     "@types/node": "26.2.0",
     "@types/react": "19.2.18",
     "@types/react-dom": "19.2.4",
+    "jsdom": "30.0.1",
     "tsx": "4.23.12",
-    "typescript": "7.0.2"
+    "typescript": "7.0.2",
+    "vitest": "4.1.10"
   }
 }

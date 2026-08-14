@@ -12,6 +12,7 @@
 ```sh
 ./run.sh             # Start the local editor
 npm run build        # Create the production Vite bundle
+npm run test:unit    # Run atomic React component tests
 ./test.sh            # Run the repository smoke checks
 ```
 
@@ -23,7 +24,7 @@ Use two-space indentation for JavaScript, JSX, and CSS. Keep React behavior clos
 
 ## Testing Guidelines
 
-There is no separate test framework currently; `./test.sh` is the smoke-test entry point and `npm run build` catches JSX and bundling errors. For interaction changes, manually verify the affected flow in the browser, including keyboard shortcuts and both Main Level and Gym where relevant.
+`./test.sh` is the smoke-test entry point, `npm run test:unit` runs Vitest component tests, and `npm run build` catches JSX and bundling errors. For interaction changes, manually verify the affected flow in the browser, including keyboard shortcuts and both Main Level and Gym where relevant.
 
 ## Commits and Pull Requests
 
